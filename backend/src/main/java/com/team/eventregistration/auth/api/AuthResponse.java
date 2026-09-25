@@ -1,0 +1,4 @@
+package com.team.eventregistration.auth.api;
+
+public class AuthResponse {
+}
