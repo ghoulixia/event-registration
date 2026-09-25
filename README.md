@@ -1,1 +1,1 @@
-** Event Registration **
+Event Registration
