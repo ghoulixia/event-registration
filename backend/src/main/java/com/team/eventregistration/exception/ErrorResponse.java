@@ -1,4 +1,10 @@
 package com.team.eventregistration.exception;
 
-public class ErrorResponse {
+import java.time.LocalDateTime;
+
+public record ErrorResponse(
+        int status,
+        String message,
+        LocalDateTime timestamp
+) {
 }

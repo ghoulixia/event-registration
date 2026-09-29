@@ -1,6 +1,6 @@
 spring:
   datasource:
-    url: ${DB_URL:jdbc:postgresql://localhost:5432/event_registration}
+    url: ${DB_URL:jdbc:postgresql://localhost:5433/event_registration}
     username: ${DB_USERNAME:event}
     password: ${DB_PASSWORD:event123}
 

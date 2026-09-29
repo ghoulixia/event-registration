@@ -33,7 +33,18 @@ public class User {
     @Column(nullable = false, length = 20)
     private Role role;
 
-    public User() {
+    public User(
+            String email,
+            String displayName,
+            String passwordHash,
+            String phone,
+            Role role
+    ) {
+        this.email = email;
+        this.displayName = displayName;
+        this.passwordHash = passwordHash;
+        this.phone = phone;
+        this.role = role;
     }
 
     // --- Getters ---
