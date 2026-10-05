@@ -7,4 +7,7 @@ public record ErrorResponse(
         String message,
         LocalDateTime timestamp
 ) {
+    public ErrorResponse(int status, String message) {
+        this(status, message, LocalDateTime.now());
+    }
 }
