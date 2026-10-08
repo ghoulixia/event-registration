@@ -10,3 +10,22 @@ spring:
 
   flyway:
     enabled: true
+    out-of-order: true
+
+  servlet:
+    multipart:
+      max-file-size: 5MB
+      max-request-size: 10MB
+
+# --- App-specific config ---
+app:
+  upload:
+    dir: ${UPLOAD_DIR:uploads/thumbnails}
+    base-url: /api/uploads/thumbnails/
+
+# --- OpenAPI / Swagger ---
+springdoc:
+  api-docs:
+    path: /v3/api-docs
+  swagger-ui:
+    path: /swagger-ui/index.html
