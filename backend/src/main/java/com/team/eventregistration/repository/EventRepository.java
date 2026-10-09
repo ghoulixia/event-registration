@@ -16,7 +16,7 @@ public interface EventRepository extends JpaRepository<Event, Long> {
     Optional<Event> findByIdAndDeletedAtIsNull(Long id);
 
     @Query("SELECT e FROM Event e WHERE e.deletedAt IS NULL "
-         + "AND (:keyword IS NULL OR LOWER(e.title) LIKE LOWER(CONCAT('%', :keyword, '%'))) "
+         + "AND (CAST(:keyword AS text) IS NULL OR LOWER(e.title) LIKE LOWER(CONCAT('%', CAST(:keyword AS text), '%'))) "
          + "AND (:city IS NULL OR e.city = :city) "
          + "AND (:category IS NULL OR e.category = :category)")
     Page<Event> findByFilters(
