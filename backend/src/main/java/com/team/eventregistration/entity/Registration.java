@@ -3,20 +3,30 @@ package com.team.eventregistration.entity;
 import jakarta.persistence.*;
 import org.hibernate.annotations.CreationTimestamp;
 
-import java.time.OffsetDateTime;
+import java.time.LocalDateTime;
 
 @Entity
-@Table(name = "registrations")
+@Table(
+        name = "registrations",
+        uniqueConstraints = {
+                @UniqueConstraint(
+                        name = "uk_registration_user_event",
+                        columnNames = {"user_id", "event_id"}
+                )
+        }
+)
 public class Registration {
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
-    @Column(name = "user_id", nullable = false)
-    private Long userId;
+    @ManyToOne(fetch = FetchType.LAZY, optional = false)
+    @JoinColumn(name = "user_id", nullable = false, updatable = false)
+    private User user;
 
-    @Column(name = "event_id", nullable = false)
-    private Long eventId;
+    @ManyToOne(fetch = FetchType.LAZY, optional = false)
+    @JoinColumn(name = "event_id", nullable = false, updatable = false)
+    private Event event;
 
     @Enumerated(EnumType.STRING)
     @Column(nullable = false, length = 20)
@@ -24,76 +34,63 @@ public class Registration {
 
     @CreationTimestamp
     @Column(name = "registered_at", nullable = false, updatable = false)
-    private OffsetDateTime registeredAt;
+    private LocalDateTime registeredAt;
 
     @Column(name = "cancelled_at")
-    private OffsetDateTime cancelledAt;
+    private LocalDateTime cancelledAt;
 
-    @PrePersist
-    protected void onCreate() {
-        if (this.status == null) {
-            status = RegistrationStatus.CONFIRMED;
-        }
-        if (this.registeredAt == null) {
-            this.registeredAt = OffsetDateTime.now();
-        }
+    protected Registration() {
     }
 
-    public Registration() {}
+    public Registration(User user, Event event) {
+        this.user = user;
+        this.event = event;
+        this.status = RegistrationStatus.CONFIRMED;
+    }
 
-    public Registration(Long userId, Long eventId, RegistrationStatus status) {
-        this.userId = userId;
-        this.eventId = eventId;
-        this.status = status;
+    public void cancel() {
+        if (this.status == RegistrationStatus.CANCELLED) {
+            return;
+        }
+
+        this.status = RegistrationStatus.CANCELLED;
+        this.cancelledAt = LocalDateTime.now();
+    }
+
+    public void confirmAgain() {
+        if (this.status != RegistrationStatus.CANCELLED) {
+            throw new IllegalStateException(
+                    "Only cancelled registrations can be confirmed again."
+            );
+        }
+
+        this.status = RegistrationStatus.CONFIRMED;
+        this.cancelledAt = null;
     }
 
     // --- Getters ---
+
     public Long getId() {
         return id;
     }
 
-    public Long getUserId() {
-        return userId;
+    public User getUser() {
+        return user;
     }
 
-    public Long getEventId() {
-        return eventId;
+    public Event getEvent() {
+        return event;
     }
 
     public RegistrationStatus getStatus() {
         return status;
     }
 
-    public OffsetDateTime getRegisteredAt() {
+    public LocalDateTime getRegisteredAt() {
         return registeredAt;
     }
 
-    public OffsetDateTime getCancelledAt() {
+    public LocalDateTime getCancelledAt() {
         return cancelledAt;
-    }
-
-    // --- Setters ---
-    public void setId(Long id) {
-        this.id = id;
-    }
-
-    public void setUserId(Long userId) {
-        this.userId = userId;
-    }
-
-    public void setEventId(Long eventId) {
-        this.eventId = eventId;
-    }
-
-    public void setStatus(RegistrationStatus status) {
-        this.status = status;
-    }
-
-    public void setRegisteredAt(OffsetDateTime registeredAt) {
-        this.registeredAt = registeredAt;
-    }
-
-    public void setCancelledAt(OffsetDateTime cancelledAt) {
-        this.cancelledAt = cancelledAt;
     }
 }

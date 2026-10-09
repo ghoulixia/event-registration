@@ -7,9 +7,9 @@ CREATE TABLE registrations (
 
     status VARCHAR(20) NOT NULL DEFAULT 'CONFIRMED',
 
-    registered_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    registered_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
 
-    cancelled_at TIMESTAMP WITH TIME ZONE,
+    cancelled_at TIMESTAMP,
 
     CONSTRAINT fk_registrations_user
         FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE,
