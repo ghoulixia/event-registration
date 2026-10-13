@@ -20,6 +20,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.dao.DataIntegrityViolationException;
 
 import java.time.LocalDateTime;
+import java.util.List;
 import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -295,6 +296,70 @@ class RegistrationServiceTest {
                     RegistrationStatus.CANCELLED,
                     canceledRegistration.getStatus()
             );
+        }
+    }
+
+    @Nested
+    @DisplayName("getMyRegistrations")
+    class GetMyRegistrations {
+
+        @Test
+        @DisplayName("Returns the user's registrations mapped to responses")
+        void shouldReturnUserRegistrations() {
+            Registration firstRegistration = new Registration(sampleUser, sampleEvent);
+            Registration secondRegistration = new Registration(sampleUser, sampleEvent);
+
+            when(userRepository.findById(1L))
+                    .thenReturn(Optional.of(sampleUser));
+            when(registrationRepository.findByUser_Id(1L))
+                    .thenReturn(List.of(firstRegistration, secondRegistration));
+
+            List<RegistrationResponse> responses =
+                    registrationService.getMyRegistrations(1L);
+
+            assertEquals(2, responses.size());
+
+            assertEquals(RegistrationStatus.CONFIRMED, responses.get(0).getStatus());
+            assertEquals(10L, responses.get(0).getEventId());
+            assertEquals("Java Workshop", responses.get(0).getEventTitle());
+
+            assertEquals(RegistrationStatus.CONFIRMED, responses.get(1).getStatus());
+            assertEquals(10L, responses.get(1).getEventId());
+            assertEquals("Java Workshop", responses.get(1).getEventTitle());
+
+            verify(userRepository).findById(1L);
+            verify(registrationRepository).findByUser_Id(1L);
+        }
+
+        @Test
+        @DisplayName("Throws ResourceNotFoundException when user does not exist")
+        void shouldThrowWhenUserDoesNotExist() {
+            when(userRepository.findById(1L))
+                    .thenReturn(Optional.empty());
+
+            assertThrows(
+                    ResourceNotFoundException.class,
+                    () -> registrationService.getMyRegistrations(1L)
+            );
+
+            verify(registrationRepository, never()).findByUser_Id(anyLong());
+        }
+
+        @Test
+        @DisplayName("Returns an empty list when user has no registrations")
+        void shouldReturnEmptyListWhenNoRegistrations() {
+            when(userRepository.findById(1L))
+                    .thenReturn(Optional.of(sampleUser));
+            when(registrationRepository.findByUser_Id(1L))
+                    .thenReturn(List.of());
+
+            List<RegistrationResponse> responses =
+                    registrationService.getMyRegistrations(1L);
+
+            assertTrue(responses.isEmpty());
+
+            verify(userRepository).findById(1L);
+            verify(registrationRepository).findByUser_Id(1L);
         }
     }
 }

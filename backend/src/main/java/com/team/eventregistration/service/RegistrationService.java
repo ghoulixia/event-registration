@@ -15,6 +15,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
+import java.util.List;
 
 @Service
 public class RegistrationService {
@@ -88,6 +89,17 @@ public class RegistrationService {
             }
             throw ex; // rethrow if it's not a duplicate registration
         }
+    }
+
+    @Transactional(readOnly = true)
+    public List<RegistrationResponse> getMyRegistrations(Long userId) {
+        User user = userRepository.findById(userId)
+                .orElseThrow(() -> new ResourceNotFoundException("User not found with ID: " + userId));
+
+        List<Registration> registrations = registrationRepository.findByUser_Id(userId);
+        return registrations.stream()
+                .map(this::mapToResponse)
+                .toList();
     }
 
     private boolean isDuplicateRegistration(DataIntegrityViolationException ex) {
