@@ -16,6 +16,7 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.dao.DataIntegrityViolationException;
 
 import java.time.LocalDateTime;
 import java.util.Optional;
@@ -69,6 +70,7 @@ class RegistrationServiceTest {
         @Test
         @DisplayName("Registers successfully when user and event exist, " +
                 "event is open and not yet started, " +
+                "event hasn't reached capacity," +
                 "and user has not registered")
         void shouldRegisterSuccessfully() {
             // Arrange: Set up the test data
@@ -78,6 +80,8 @@ class RegistrationServiceTest {
                     .thenReturn(Optional.of(sampleEvent));
             when(registrationRepository.findByUser_IdAndEvent_Id(1L, 10L))
                     .thenReturn(Optional.empty());
+            when(eventRepository.incrementRegisteredCountIfCapacityAvailable(10L))
+                    .thenReturn(1);
             when(registrationRepository.saveAndFlush(any(Registration.class)))
                     .thenAnswer(invocation -> invocation.getArgument(0));
 
@@ -143,6 +147,29 @@ class RegistrationServiceTest {
             verify(registrationRepository).save(captor.capture());
 
             assertEquals(RegistrationStatus.CONFIRMED, captor.getValue().getStatus());
+        }
+
+        @Test
+        @DisplayName("Propagates exception when saving registration fails")
+        void shouldFailWhenSavingRegistrationFails() {
+            when(userRepository.findById(1L))
+                    .thenReturn(Optional.of(sampleUser));
+            when(eventRepository.findByIdAndDeletedAtIsNull(10L))
+                    .thenReturn(Optional.of(sampleEvent));
+            when(registrationRepository.findByUser_IdAndEvent_Id(1L, 10L))
+                    .thenReturn(Optional.empty());
+            when(eventRepository.incrementRegisteredCountIfCapacityAvailable(10L))
+                    .thenReturn(1);
+            when(registrationRepository.saveAndFlush(any(Registration.class)))
+                    .thenThrow(new DataIntegrityViolationException("Simulated database error"));
+
+            assertThrows(
+                    DataIntegrityViolationException.class,
+                    () -> registrationService.registerForEvent(1L, 10L)
+            );
+
+            verify(eventRepository).incrementRegisteredCountIfCapacityAvailable(10L);
+            verify(registrationRepository).saveAndFlush(any(Registration.class));
         }
 
         @Test

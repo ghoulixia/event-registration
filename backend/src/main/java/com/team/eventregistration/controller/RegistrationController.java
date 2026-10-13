@@ -31,7 +31,7 @@ public class RegistrationController {
     @ApiResponse(responseCode = "200", description = "Registration successful")
     @ApiResponse(responseCode = "400", description = "Invalid registration request")
     @ApiResponse(responseCode = "404", description = "User or Event not found")
-    @ApiResponse(responseCode = "409", description = "User has already registered for this event")
+    @ApiResponse(responseCode = "409", description = "Event is full or User has already registered for this event")
     public ResponseEntity<RegistrationResponse> registerForEvent(@PathVariable Long id, @RequestParam Long userId) {
         RegistrationResponse response = registrationService.registerForEvent(userId, id);
         return ResponseEntity.ok(response);

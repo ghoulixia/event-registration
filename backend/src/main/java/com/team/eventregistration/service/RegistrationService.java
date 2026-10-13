@@ -4,6 +4,7 @@ import com.team.eventregistration.dto.RegistrationResponse;
 import com.team.eventregistration.entity.*;
 import com.team.eventregistration.exception.BusinessRuleException;
 import com.team.eventregistration.exception.DuplicateRegistrationException;
+import com.team.eventregistration.exception.EventFullException;
 import com.team.eventregistration.exception.ResourceNotFoundException;
 import com.team.eventregistration.repository.EventRepository;
 import com.team.eventregistration.repository.RegistrationRepository;
@@ -64,7 +65,13 @@ public class RegistrationService {
             return mapToResponse(registrationRepository.save(existingRegistration));
         }
 
-        // 5. Save the new registration and handle potential duplicate registration exceptions
+        // 5. Atomically reserve a slot before creating the registration
+        int updatedRows = eventRepository.incrementRegisteredCountIfCapacityAvailable(eventId);
+        if (updatedRows == 0) {
+            throw new EventFullException("Event is full. Cannot register.");
+        }
+
+        // 6. Save the new registration and handle potential duplicate registration exceptions
         Registration registration = new Registration(user, event);
         try {
             Registration savedRegistration = registrationRepository.saveAndFlush(registration);
