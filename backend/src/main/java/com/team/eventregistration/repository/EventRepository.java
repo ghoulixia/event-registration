@@ -32,6 +32,7 @@ public interface EventRepository extends JpaRepository<Event, Long> {
     @Query("UPDATE Event e "
          + "SET e.registeredCount = e.registeredCount + 1 "
          + "WHERE e.id = :eventId "
+         + "AND e.status = 'OPEN' "
          + "AND e.registeredCount < e.capacity "
          + "AND e.deletedAt IS NULL")
     int incrementRegisteredCountIfCapacityAvailable(

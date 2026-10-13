@@ -61,6 +61,12 @@ public class RegistrationService {
                 throw new DuplicateRegistrationException("User has already registered for this event.");
             }
 
+            // Atomically reserve a slot before re-registering
+            int updatedRows = eventRepository.incrementRegisteredCountIfCapacityAvailable(eventId);
+            if (updatedRows == 0) {
+                throw new EventFullException("Event is full. Cannot register.");
+            }
+
             existingRegistration.confirmAgain();
             return mapToResponse(registrationRepository.save(existingRegistration));
         }

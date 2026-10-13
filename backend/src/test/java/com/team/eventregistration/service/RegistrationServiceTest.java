@@ -4,6 +4,7 @@ import com.team.eventregistration.dto.RegistrationResponse;
 import com.team.eventregistration.entity.*;
 import com.team.eventregistration.exception.BusinessRuleException;
 import com.team.eventregistration.exception.DuplicateRegistrationException;
+import com.team.eventregistration.exception.EventFullException;
 import com.team.eventregistration.exception.ResourceNotFoundException;
 import com.team.eventregistration.repository.EventRepository;
 import com.team.eventregistration.repository.RegistrationRepository;
@@ -94,6 +95,7 @@ class RegistrationServiceTest {
             assertEquals("Java Workshop", response.getEventTitle());
             assertEquals(RegistrationStatus.CONFIRMED, response.getStatus());
 
+            verify(eventRepository).incrementRegisteredCountIfCapacityAvailable(10L);
             verify(registrationRepository).saveAndFlush(any(Registration.class));
         }
 
@@ -132,6 +134,8 @@ class RegistrationServiceTest {
 
             when(registrationRepository.findByUser_IdAndEvent_Id(1L, 10L))
                     .thenReturn(Optional.of(canceledRegistration));
+            when(eventRepository.incrementRegisteredCountIfCapacityAvailable(10L))
+                    .thenReturn(1);
             when(registrationRepository.save(canceledRegistration))
                     .thenAnswer(invocation -> invocation.getArgument(0));
 
@@ -141,6 +145,7 @@ class RegistrationServiceTest {
             assertEquals(10L, response.getEventId());
             assertEquals("Java Workshop", response.getEventTitle());
             assertEquals(RegistrationStatus.CONFIRMED, response.getStatus());
+            verify(eventRepository).incrementRegisteredCountIfCapacityAvailable(10L);
 
             ArgumentCaptor<Registration> captor = ArgumentCaptor.forClass(Registration.class);
 
@@ -239,6 +244,57 @@ class RegistrationServiceTest {
             );
 
             verify(registrationRepository, never()).saveAndFlush(any(Registration.class));
+        }
+
+        @Test
+        @DisplayName("Throws EventFullException when event is full")
+        void shouldThrowWhenEventIsFull() {
+            when(userRepository.findById(1L))
+                    .thenReturn(Optional.of(sampleUser));
+            when(eventRepository.findByIdAndDeletedAtIsNull(10L))
+                    .thenReturn(Optional.of(sampleEvent));
+            when(registrationRepository.findByUser_IdAndEvent_Id(1L, 10L))
+                    .thenReturn(Optional.empty());
+            when(eventRepository.incrementRegisteredCountIfCapacityAvailable(10L))
+                    .thenReturn(0); // Simulate event is full
+
+            assertThrows(
+                    EventFullException.class,
+                    () -> registrationService.registerForEvent(1L, 10L)
+            );
+
+            verify(eventRepository).incrementRegisteredCountIfCapacityAvailable(10L);
+            verify(registrationRepository, never()).saveAndFlush(any(Registration.class));
+        }
+
+        @Test
+        @DisplayName("Throws EventFullException when re-registering for a canceled registration and event is full")
+        void shouldThrowWhenReRegisteringAndEventIsFull() {
+            when(userRepository.findById(1L))
+                    .thenReturn(Optional.of(sampleUser));
+            when(eventRepository.findByIdAndDeletedAtIsNull(10L))
+                    .thenReturn(Optional.of(sampleEvent));
+
+            Registration canceledRegistration = new Registration(sampleUser, sampleEvent);
+            canceledRegistration.cancel();
+
+            when(registrationRepository.findByUser_IdAndEvent_Id(1L, 10L))
+                    .thenReturn(Optional.of(canceledRegistration));
+            when(eventRepository.incrementRegisteredCountIfCapacityAvailable(10L))
+                    .thenReturn(0); // Simulate event is full
+
+            assertThrows(
+                    EventFullException.class,
+                    () -> registrationService.registerForEvent(1L, 10L)
+            );
+
+            verify(eventRepository).incrementRegisteredCountIfCapacityAvailable(10L);
+            verify(registrationRepository, never()).save(any(Registration.class));
+
+            assertEquals(
+                    RegistrationStatus.CANCELLED,
+                    canceledRegistration.getStatus()
+            );
         }
     }
 }
