@@ -33,6 +33,9 @@ public class User {
     @Column(nullable = false, length = 20)
     private Role role;
 
+    protected User() {
+    }
+
     public User(
             String email,
             String displayName,
