@@ -22,4 +22,7 @@ public record RegisterRequest(
 
         String phone
 ) {
+    public RegisterRequest {
+        if (email != null) email = email.trim().toLowerCase(java.util.Locale.ROOT);
+    }
 }
