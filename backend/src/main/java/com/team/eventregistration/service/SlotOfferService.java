@@ -10,12 +10,13 @@ import com.team.eventregistration.repository.SlotOfferRepository;
 import com.team.eventregistration.repository.WaitlistEntryRepository;
 import jakarta.persistence.EntityManager;
 import jakarta.persistence.PersistenceContext;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Clock;
 import java.time.LocalDateTime;
-import java.time.ZoneId;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Optional;
@@ -23,8 +24,6 @@ import java.util.Set;
 
 @Service
 public class SlotOfferService {
-    private static final ZoneId EVENT_ZONE = ZoneId.of("Asia/Ho_Chi_Minh");
-
     private final SlotOfferRepository slotOfferRepository;
     private final EventRepository eventRepository;
     private final WaitlistEntryRepository waitlistEntryRepository;
@@ -34,6 +33,7 @@ public class SlotOfferService {
     @PersistenceContext
     private EntityManager entityManager;
 
+    @Autowired
     public SlotOfferService(
             SlotOfferRepository slotOfferRepository,
             EventRepository eventRepository,
@@ -41,7 +41,7 @@ public class SlotOfferService {
             RegistrationRepository registrationRepository
     ) {
         this(slotOfferRepository, eventRepository, waitlistEntryRepository,
-                registrationRepository, Clock.system(EVENT_ZONE));
+                registrationRepository, Clock.systemDefaultZone());
     }
 
     public SlotOfferService(
@@ -80,7 +80,7 @@ public class SlotOfferService {
     }
 
     @Transactional(
-            propagation = org.springframework.transaction.annotation.Propagation.REQUIRES_NEW,
+            propagation = Propagation.REQUIRES_NEW,
             noRollbackFor = SlotOfferOutcomeException.class
     )
     public SlotOffer acceptOffer(Long userId, Long offerId) {
@@ -139,7 +139,7 @@ public class SlotOfferService {
     }
 
     @Transactional(
-            propagation = org.springframework.transaction.annotation.Propagation.REQUIRES_NEW,
+            propagation = Propagation.REQUIRES_NEW,
             noRollbackFor = SlotOfferOutcomeException.class
     )
     public void declineOffer(Long userId, Long offerId) {
@@ -199,15 +199,14 @@ public class SlotOfferService {
         for (Event startedEvent : eventRepository.findByStartTimeLessThanEqual(at)) {
             processedEventIds.add(startedEvent.getId());
         }
+        for (Event inactiveEvent : eventRepository.findInactiveWithActiveWaitlistEntries()) {
+            processedEventIds.add(inactiveEvent.getId());
+        }
         int expiredCount = 0;
 
         for (Long eventId : processedEventIds) {
             Event event = lockEvent(eventId);
-            int newlyExpired = expirePendingOffers(event, at);
-            expiredCount += newlyExpired;
-            if (!at.isBefore(event.getStartTime())) {
-                finishWaitlistAtEventStartLocked(event, at);
-            }
+            expiredCount += processEventOffersLocked(event, at);
         }
 
         for (SlotOffer candidate : candidates) {
@@ -216,14 +215,20 @@ public class SlotOfferService {
                 continue;
             }
             Event event = lockEvent(eventId);
-            int newlyExpired = expirePendingOffers(event, at);
-            expiredCount += newlyExpired;
-            if (newlyExpired > 0 && isOpenAndUpcoming(event, at)) {
-                offerNextWaitingEntry(event, at);
-            }
+            expiredCount += processEventOffersLocked(event, at);
             processedEventIds.add(eventId);
         }
         return expiredCount;
+    }
+
+    private int processEventOffersLocked(Event event, LocalDateTime at) {
+        int newlyExpired = expirePendingOffers(event, at);
+        if (!isOpenAndUpcoming(event, at)) {
+            finishInactiveWaitlistLocked(event, at);
+        } else if (newlyExpired > 0) {
+            offerNextWaitingEntry(event, at);
+        }
+        return newlyExpired;
     }
 
     @Transactional
@@ -237,6 +242,10 @@ public class SlotOfferService {
             return;
         }
 
+        finishInactiveWaitlistLocked(event, at);
+    }
+
+    private void finishInactiveWaitlistLocked(Event event, LocalDateTime at) {
         for (SlotOffer offer : slotOfferRepository.findByEvent_IdAndStatus(
                 event.getId(), SlotOfferStatus.PENDING)) {
             if (at.isBefore(offer.getExpiresAt())) {
@@ -323,7 +332,7 @@ public class SlotOfferService {
         offer.setStatus(SlotOfferStatus.EXPIRED);
         offer.setResolvedAt(at);
         entry.skip();
-        decrementHeldCount(offer.getEvent());
+        releaseHeldSlotIfPresent(offer.getEvent());
         waitlistEntryRepository.save(entry);
         slotOfferRepository.save(offer);
         return true;
@@ -341,7 +350,7 @@ public class SlotOfferService {
         offer.setStatus(SlotOfferStatus.REVOKED);
         offer.setResolvedAt(at);
         entry.cancel();
-        decrementHeldCount(offer.getEvent());
+        releaseHeldSlotIfPresent(offer.getEvent());
         waitlistEntryRepository.save(entry);
         slotOfferRepository.save(offer);
     }
@@ -399,6 +408,15 @@ public class SlotOfferService {
         }
         event.setHeldCount(event.getHeldCount() - 1);
         validateCounters(event);
+    }
+
+    private void releaseHeldSlotIfPresent(Event event) {
+        if (event.getHeldCount() == null) {
+            throw new BusinessRuleException("Event held count is inconsistent.");
+        }
+        if (event.getHeldCount() > 0) {
+            decrementHeldCount(event);
+        }
     }
 
     private void acceptHeldSlot(Event event) {

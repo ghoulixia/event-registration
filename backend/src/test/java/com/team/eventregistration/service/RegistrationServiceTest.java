@@ -34,6 +34,7 @@ class RegistrationServiceTest {
     @Mock private UserRepository userRepository;
 
     @Mock private EventRepository eventRepository;
+    @Mock private SlotOfferService slotOfferService;
 
     private RegistrationService registrationService;
 
@@ -46,7 +47,8 @@ class RegistrationServiceTest {
         userRepository = mock(UserRepository.class);
         eventRepository = mock(EventRepository.class);
 
-        registrationService = new RegistrationService(registrationRepository, eventRepository, userRepository);
+        registrationService = new RegistrationService(
+                registrationRepository, eventRepository, userRepository, slotOfferService);
 
         sampleUser = new User(
                 "reimuhakurei@gensokyo.jp",

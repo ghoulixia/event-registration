@@ -9,6 +9,7 @@ import com.team.eventregistration.exception.ResourceNotFoundException;
 import com.team.eventregistration.repository.EventRepository;
 import com.team.eventregistration.repository.RegistrationRepository;
 import com.team.eventregistration.repository.UserRepository;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.hibernate.exception.ConstraintViolationException;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
@@ -24,15 +25,19 @@ public class RegistrationService {
     private final RegistrationRepository registrationRepository;
     private final EventRepository eventRepository;
     private final UserRepository userRepository;
+    private final SlotOfferService slotOfferService;
 
+    @Autowired
     public RegistrationService(
             RegistrationRepository registrationRepository,
             EventRepository eventRepository,
-            UserRepository userRepository
+            UserRepository userRepository,
+            SlotOfferService slotOfferService
     ) {
         this.registrationRepository = registrationRepository;
         this.eventRepository = eventRepository;
         this.userRepository = userRepository;
+        this.slotOfferService = slotOfferService;
     }
 
     @Transactional
@@ -168,6 +173,8 @@ public class RegistrationService {
             throw new BusinessRuleException(
                     "Event registration count could not be updated consistently.");
         }
+
+        slotOfferService.offerNextWaitingEntry(eventId);
     }
 
     private boolean isDuplicateRegistration(DataIntegrityViolationException ex) {

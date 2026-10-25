@@ -94,6 +94,30 @@ class SlotOfferServiceIntegrationTest {
     }
 
     @Test
+    void declinesOfferAndOffersNextWaitingEntryInFifoOrder() {
+        User firstUser = saveUser("decline-first");
+        User secondUser = saveUser("decline-second");
+        Event event = saveEvent(LocalDateTime.now().plusHours(2), 1);
+        saveEntry(firstUser, event);
+        saveEntry(secondUser, event);
+
+        SlotOffer firstOffer = slotOfferService.offerNextWaitingEntry(event.getId()).orElseThrow();
+        slotOfferService.declineOffer(firstUser.getId(), firstOffer.getId());
+        entityManager.clear();
+
+        assertEquals(SlotOfferStatus.DECLINED,
+                slotOfferRepository.findById(firstOffer.getId()).orElseThrow().getStatus());
+        assertEquals(WaitlistEntryStatus.LEFT,
+                waitlistEntryRepository.findById(firstOffer.getWaitlistEntry().getId())
+                        .orElseThrow().getStatus());
+        SlotOffer secondOffer = slotOfferRepository
+                .findByUser_IdAndEvent_IdAndStatus(
+                        secondUser.getId(), event.getId(), SlotOfferStatus.PENDING)
+                .orElseThrow();
+        assertEquals(secondUser.getId(), secondOffer.getUser().getId());
+    }
+
+    @Test
     void eventStartExpiresAndRevokesPendingOffersAndCancelsWaitingEntries() {
         User offeredUser = saveUser("started-offered");
         User waitingUser = saveUser("started-waiting");

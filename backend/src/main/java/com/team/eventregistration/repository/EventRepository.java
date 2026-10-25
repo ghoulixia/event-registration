@@ -61,4 +61,9 @@ public interface EventRepository extends JpaRepository<Event, Long> {
     );
 
     List<Event> findByStartTimeLessThanEqual(LocalDateTime now);
+
+    @Query("SELECT DISTINCT e FROM Event e JOIN WaitlistEntry w ON w.event.id = e.id "
+         + "WHERE (e.status <> 'OPEN' OR e.deletedAt IS NOT NULL) "
+         + "AND w.status IN ('WAITING', 'OFFERED')")
+    List<Event> findInactiveWithActiveWaitlistEntries();
 }
