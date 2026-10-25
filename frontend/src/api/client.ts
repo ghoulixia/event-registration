@@ -10,7 +10,7 @@ export function setToken(token: string | null) {
 }
 
 const apiClient = axios.create({
-    baseURL: "http://localhost:8080/api",
+    baseURL: import.meta.env.VITE_API_URL ?? "http://localhost:8080/api",
     headers: { "Content-Type": "application/json" },
 });
 
@@ -29,5 +29,14 @@ apiClient.interceptors.response.use(response => response, error => {
     }
     return Promise.reject(error);
 });
+
+export function errorMessage(error: unknown): string {
+    if (axios.isAxiosError(error)) return error.response?.data?.message ?? "Unable to complete the request.";
+    return "Unable to complete the request.";
+}
+
+export function mediaUrl(path: string): string {
+    return new URL(path, new URL(apiClient.defaults.baseURL!, window.location.origin)).toString();
+}
 
 export default apiClient;
