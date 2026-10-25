@@ -11,3 +11,7 @@ ALTER TABLE events
 ALTER TABLE events
     ADD CONSTRAINT chk_events_offer_ttl
         CHECK (offer_ttl_minutes BETWEEN 5 AND 30);
+
+ALTER TABLE events
+    ADD CONSTRAINT chk_events_total_held_registered
+        CHECK (registered_count + held_count <= capacity);

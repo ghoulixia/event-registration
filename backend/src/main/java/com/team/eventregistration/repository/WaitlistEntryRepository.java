@@ -2,7 +2,11 @@ package com.team.eventregistration.repository;
 
 import com.team.eventregistration.entity.WaitlistEntry;
 import com.team.eventregistration.entity.WaitlistEntryStatus;
+import jakarta.persistence.LockModeType;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Lock;
+import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.repository.query.Param;
 
 import java.util.List;
 import java.util.Optional;
@@ -16,4 +20,12 @@ public interface WaitlistEntryRepository extends JpaRepository<WaitlistEntry, Lo
 
     List<WaitlistEntry> findByUser_IdAndStatusOrderByJoinedAtAscIdAsc(
             Long userId, WaitlistEntryStatus status);
+
+    List<WaitlistEntry> findByEvent_Id(Long eventId);
+
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("SELECT w FROM WaitlistEntry w WHERE w.id = :entryId")
+    Optional<WaitlistEntry> findByIdForUpdate(
+            @Param("entryId") Long entryId
+    );
 }

@@ -120,6 +120,12 @@ public class Event {
     public Integer getRegisteredCount() { return registeredCount; }
     public void setRegisteredCount(Integer registeredCount) { this.registeredCount = registeredCount; }
 
+    public Integer getHeldCount() { return heldCount; }
+    public void setHeldCount(Integer heldCount) { this.heldCount = heldCount; }
+
+    public Integer getOfferTtlMinutes() { return offerTtlMinutes; }
+    public void setOfferTtlMinutes(Integer offerTtlMinutes) { this.offerTtlMinutes = offerTtlMinutes; }
+
     public EventStatus getStatus() { return status; }
     public void setStatus(EventStatus status) { this.status = status; }
 

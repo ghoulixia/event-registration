@@ -31,4 +31,6 @@ public interface SlotOfferRepository extends JpaRepository<SlotOffer, Long> {
             Long eventId,
             SlotOfferStatus status
     );
+
+    List<SlotOffer> findByEvent_Id(Long eventId);
 }

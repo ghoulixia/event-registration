@@ -40,12 +40,50 @@ public class WaitlistEntry {
         this.status = WaitlistEntryStatus.WAITING;
     }
 
+    public void offer() {
+        if (this.status != WaitlistEntryStatus.WAITING) {
+            throw new IllegalStateException(
+                    "Only WAITING entries can be offered a slot."
+            );
+        }
+        this.status = WaitlistEntryStatus.OFFERED;
+    }
+
+    public void accept() {
+        if (this.status != WaitlistEntryStatus.OFFERED) {
+            throw new IllegalStateException(
+                    "Only OFFERED entries can be accepted."
+            );
+        }
+        this.status = WaitlistEntryStatus.ACCEPTED;
+    }
+
     public void leave() {
-        if (status == WaitlistEntryStatus.LEFT) {
+        if (this.status == WaitlistEntryStatus.LEFT) {
             return;
         }
-        status = WaitlistEntryStatus.LEFT;
-        leftAt = LocalDateTime.now();
+        this.status = WaitlistEntryStatus.LEFT;
+        this.leftAt = LocalDateTime.now();
+    }
+
+    public void skip() {
+        if (this.status != WaitlistEntryStatus.OFFERED) {
+            throw new IllegalStateException(
+                    "Only OFFERED entries can be skipped."
+            );
+        }
+        this.status = WaitlistEntryStatus.SKIPPED;
+    }
+
+    public void cancel() {
+        if (this.status != WaitlistEntryStatus.WAITING
+                && this.status != WaitlistEntryStatus.OFFERED) {
+            throw new IllegalStateException(
+                    "Only active waitlist entries can be canceled."
+            );
+        }
+        this.status = WaitlistEntryStatus.CANCELLED;
+        this.leftAt = LocalDateTime.now();
     }
 
     public Long getId() { return id; }

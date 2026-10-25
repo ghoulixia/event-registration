@@ -59,4 +59,6 @@ public interface EventRepository extends JpaRepository<Event, Long> {
     List<Event> findByStartTimeLessThanEqualAndDeletedAtIsNull(
             LocalDateTime now
     );
+
+    List<Event> findByStartTimeLessThanEqual(LocalDateTime now);
 }
