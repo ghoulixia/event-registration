@@ -1,231 +1,92 @@
 # Event Registration System
 
-Hệ thống đăng ký sự kiện, phát triển theo **Layered Architecture** với một frontend React và một backend Spring Boot.
+Backend đăng ký sự kiện dùng Java 21, Spring Boot 4, PostgreSQL và Spring Data JPA, hỗ trợ sự kiện của
+trường, câu lạc bộ và các đơn vị bên ngoài.
 
-## 1. Tech stack
+## Chức năng
 
-### Backend
-- Java 21
-- Spring Boot 4.1.1
-- Maven
-- Spring Web
-- Spring Data JPA / Hibernate
-- Spring Validation
-- Spring Security
-- Flyway
+- Xem danh sách, chi tiết Event; lọc theo từ khóa, thành phố, loại; sắp xếp và phân trang.
+- Đăng ký tài khoản, đăng nhập JWT; người tạo Event trở thành owner.
+- Owner sửa thông tin, capacity và TTL; đóng/mở đăng ký, upload thumbnail, xem participants và audit.
+- Owner loại participant trước giờ bắt đầu, ghi REMOVED cùng lý do và trả chỗ.
+- Xóa mềm Event có lý do, giữ registrations và audit.
+- Đăng ký thường được xác nhận ngay; hủy trước startTime, kể cả khi Event đang CLOSED tạm thời.
 
-### Database / Infrastructure
-- PostgreSQL 16
-- Docker / Docker Compose
+Module Waitlist/SlotOffer chưa được merge vào main. Bản hiện tại lưu cấu hình TTL và cung cấp
+EventOfferLifecycle để nối module này vào transaction của Event. FIFO, cấp/accept offer và scheduler
+chưa hoạt động trong main.
 
-### Frontend
-- React
-- TypeScript
-- Vite
-- Axios
-- React Router
-
-## 2. Yêu cầu trước khi chạy
-
-Cần cài:
+## Cấu trúc
 
 ```text
-Git
-Docker Desktop
-JDK 21
-Node.js 22 LTS
-npm
+Controller -> Service (@Transactional) -> Repository/data adapter -> PostgreSQL
 ```
 
-Kiểm tra:
+Controller xử lý HTTP, DTO và principal. EventService kiểm tra owner, thời gian và capacity. Các thao tác
+cập nhật Event và Registration dùng chung khóa PESSIMISTIC_WRITE trên Event, rồi kiểm tra lại dữ liệu
+và thời gian. EventStore/PageResult giữ các kiểu Spring Data ở lớp adapter. Baseline xử lý đồng bộ trong
+một backend và một PostgreSQL.
+
+Xem [API](docs/api-contract.md) và [thiết kế](docs/architecture.md).
+
+## Chạy bằng Docker
+
+Cần Docker Desktop ở chế độ Linux containers. Tại thư mục gốc:
 
 ```powershell
-java -version
-node -v
-npm -v
-docker --version
-docker compose version
-git --version
+$env:JWT_SECRET = [Convert]::ToBase64String([Security.Cryptography.RandomNumberGenerator]::GetBytes(32))
+docker compose up --build -d
 ```
 
+Backend: http://localhost:8080. Swagger: http://localhost:8080/swagger-ui/index.html.
+PostgreSQL dùng cổng 5433; dữ liệu và thumbnail được lưu trong named volume. Giữ JWT_SECRET ổn định
+giữa các lần chạy để token cũ tiếp tục hợp lệ; không đưa khóa vào Git.
 
-## 3. Khởi động PostgreSQL
+## Chạy Java và frontend riêng
 
-Đứng tại thư mục root có `compose.yaml`:
+Cần JDK 21, Maven Wrapper và PostgreSQL. Ví dụ với DB mới dành riêng cho dự án:
 
 ```powershell
-docker compose up -d
-```
-
-Kiểm tra:
-
-```powershell
-docker compose ps
-```
-
-PostgreSQL cần ở trạng thái `Up`.
-
-Cấu hình development hiện tại:
-
-```text
-Database: event_registration
-Username: event
-Password: event123
-Host: localhost
-Host port: 5433
-Container port: 5432
-```
-
-Để vào PostgreSQL trực tiếp:
-
-```powershell
-docker exec -it event-registration-postgres psql -U event -d event_registration
-```
-
-Một số lệnh hữu ích:
-
-```sql
-\dt
-\d users
-\q
-```
-
-> Credential trên chỉ dùng cho development local.
-
-## 4. Chạy backend
-
-### Windows PowerShell
-
-Từ root project:
-
-```powershell
+$env:JWT_SECRET = [Convert]::ToBase64String([Security.Cryptography.RandomNumberGenerator]::GetBytes(32))
+$env:DB_URL = 'jdbc:postgresql://localhost:5433/event_registration'
+$env:DB_USERNAME = 'event'
+$env:DB_PASSWORD = 'event123'
 cd backend
 .\mvnw.cmd spring-boot:run
 ```
 
-Backend mặc định chạy tại:
+UPLOAD_DIR đặt thư mục thumbnail, mặc định uploads/thumbnails. Event datetime dùng giờ
+Asia/Ho_Chi_Minh; audit dùng Instant/TIMESTAMPTZ.
 
-```text
-http://localhost:8080
-```
+Frontend hỗ trợ demo quản lý Event. Trong frontend, chạy npm ci rồi npm run dev. VITE_API_URL mặc định
+là http://localhost:8080/api. CORS mặc định cho localhost/127.0.0.1 cổng 5173; dùng
+app.cors.allowed-origins khi chạy cổng khác. Demo owner chưa có trang lịch sử đăng ký cá nhân.
 
-Khi terminal hiển thị:
+## Migration và dữ liệu cũ
 
-```text
-Started EventRegistrationApplication
-```
+V1–V6 giữ nguyên từ main GitHub. V11 bổ sung owner, heldCount/TTL và thông tin REMOVED, sử dụng bảng
+audit hiện có. V7–V10 thuộc nhánh waitlist nên không tái sử dụng. Flyway bật out-of-order để ghép các
+migration đó sau khi kiểm tra tương thích.
 
-backend đã khởi động thành công.
+Event cũ giữ organizer_user_id=NULL: vẫn được xem công khai, chỉ được quản lý sau khi có mapping owner
+đã xác minh.
 
-### Flyway
+Nếu DB đã chạy V5/V6 thử nghiệm local khác nội dung trên GitHub, hãy sao lưu và kiểm tra
+flyway_schema_history trước khi chuyển đổi. Không sửa checksum hoặc dùng Flyway repair để bỏ qua xung
+đột; không xóa volume cũ để khắc phục lỗi migration. Kiểm thử và demo nên dùng DB riêng.
 
-Flyway tự chạy migration khi Spring Boot khởi động.
+## Kiểm thử
 
-Migration nằm tại:
-
-```text
-backend/src/main/resources/db/migration/
-```
-
-## 5. Chạy frontend sau khi backend đã chạy
-
-Giữ terminal backend đang chạy và mở **một terminal PowerShell mới**.
-
-Từ root project:
+Khởi động Docker Desktop, rồi chạy trong backend:
 
 ```powershell
-cd frontend
-npm install
-npm run dev
+.\mvnw.cmd clean test
 ```
 
-Khi Vite khởi động thành công sẽ hiển thị URL tương tự:
+Integration test dùng PostgreSQL 16 Testcontainers và thư mục upload trong target. Bộ kiểm thử bao gồm
+owner, thời gian sau khóa, counter, REMOVED/rejoin, rollback audit/ảnh và API. Contract test dùng provider
+giả lập để kiểm tra việc gọi hook waitlist trong cùng transaction; FIFO và scheduler thuộc module chưa
+merge. Unit test kiểm tra các nhánh nghiệp vụ bằng mock.
 
-```text
-http://localhost:5173/
-```
-
-Mở URL đó trên trình duyệt.
-
-Frontend hiện được cấu hình gọi backend tại:
-
-```text
-http://localhost:8080/api
-```
-
-qua file:
-
-```text
-frontend/src/api/client.ts
-```
-
-Luồng chạy local:
-
-```text
-Browser
-  ↓
-React / Vite :5173
-  ↓ HTTP
-Spring Boot :8080
-  ↓ JDBC
-PostgreSQL Docker :5433
-```
-
-### Lần đầu clone project
-
-Sau khi pull hoặc clone frontend, chỉ cần:
-
-```powershell
-cd frontend
-npm install
-npm run dev
-```
-
-`npm install` sẽ cài dependency dựa trên `package.json` và `package-lock.json`.
-
-## 6. Kiến trúc backend
-
-Backend sử dụng Layered Architecture:
-
-```text
-Client
-  ↓
-Controller
-  ↓
-Service
-  ↓
-Repository
-  ↓
-PostgreSQL
-```
-
-Package root:
-
-```text
-com.team.eventregistration
-```
-
-Cấu trúc chính:
-
-```text
-backend/src/main/java/com/team/eventregistration/
-├── EventRegistrationApplication.java
-├── controller/
-├── service/
-├── repository/
-├── entity/
-├── dto/
-├── security/
-├── exception/
-└── config/
-```
-
-Quy ước:
-- `Controller`: nhận/trả HTTP, validate DTO và gọi Service.
-- `Service`: chứa business logic.
-- `Repository`: truy cập dữ liệu qua Spring Data JPA.
-- `Entity`: ánh xạ dữ liệu PostgreSQL.
-- `DTO`: dữ liệu request/response của API.
-- `security`, `exception`, `config`: cấu hình dùng chung.
-
-Controller không gọi Repository trực tiếp.
+Frontend: npm run build và npm run lint. Bản này chưa có kết quả kiểm thử tải Kaggle. Đánh giá baseline
+và cải tiến Pha 2 cần số liệu trên cùng cấu hình phần cứng.
