@@ -66,6 +66,12 @@ public class Event {
     @Column(name = "updated_at", nullable = false)
     private LocalDateTime updatedAt;
 
+    @Column(name = "held_count", nullable = false)
+    private Integer heldCount = 0;
+
+    @Column(name = "offer_ttl_minutes", nullable = false)
+    private Integer offerTtlMinutes = 10;
+
     @PrePersist
     protected void onCreate() {
         LocalDateTime now = LocalDateTime.now();
@@ -73,6 +79,8 @@ public class Event {
         this.updatedAt = now;
         if (this.status == null) this.status = EventStatus.OPEN;
         if (this.registeredCount == null) this.registeredCount = 0;
+        if (this.heldCount == null) this.heldCount = 0;
+        if (this.offerTtlMinutes == null) this.offerTtlMinutes = 10;
     }
 
     @PreUpdate

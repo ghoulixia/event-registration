@@ -12,6 +12,9 @@ import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
 import jakarta.persistence.LockModeType;
+
+import java.time.LocalDateTime;
+import java.util.List;
 import java.util.Optional;
 
 public interface EventRepository extends JpaRepository<Event, Long> {
@@ -49,7 +52,11 @@ public interface EventRepository extends JpaRepository<Event, Long> {
          + "SET e.registeredCount = e.registeredCount - 1 "
          + "WHERE e.id = :eventId "
          + "AND e.status = 'OPEN' "
-         + "AND e.registeredCount > 0"
+         + "AND e.registeredCount > 0 "
          + "AND e.deletedAt IS NULL")
     int decrementRegisteredCount(@Param("eventId") Long eventId);
+
+    List<Event> findByStartTimeLessThanEqualAndDeletedAtIsNull(
+            LocalDateTime now
+    );
 }

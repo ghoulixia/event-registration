@@ -33,7 +33,7 @@ public class Registration {
     private RegistrationStatus status;
 
     @CreationTimestamp
-    @Column(name = "registered_at", nullable = false, updatable = false)
+    @Column(name = "registered_at", nullable = false)
     private LocalDateTime registeredAt;
 
     @Column(name = "cancelled_at")
@@ -66,6 +66,7 @@ public class Registration {
 
         this.status = RegistrationStatus.CONFIRMED;
         this.cancelledAt = null;
+        this.registeredAt = LocalDateTime.now();
     }
 
     // --- Getters ---
