@@ -1,6 +1,7 @@
 package com.team.eventregistration.security;
 
 import com.team.eventregistration.repository.UserRepository;
+import io.jsonwebtoken.JwtException;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
@@ -29,16 +30,12 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
         if (header != null && header.startsWith("Bearer ")) {
             try {
                 Long id = jwt.verify(header.substring(7));
-                if (!users.existsById(id)) {
-                    reject(response);
-                    return;
-                }
-                SecurityContextHolder.getContext().setAuthentication(
-                        new UsernamePasswordAuthenticationToken(id, null, java.util.List.of()));
-            } catch (RuntimeException ex) {
+                if (users.existsById(id)) {
+                    SecurityContextHolder.getContext().setAuthentication(
+                            new UsernamePasswordAuthenticationToken(id, null, java.util.List.of()));
+                } else SecurityContextHolder.clearContext();
+            } catch (JwtException | IllegalArgumentException ex) {
                 SecurityContextHolder.clearContext();
-                reject(response);
-                return;
             }
         }
         chain.doFilter(request, response);

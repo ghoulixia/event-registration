@@ -7,6 +7,10 @@ import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
 import jakarta.persistence.Table;
 import java.time.Instant;
+import java.util.Map;
+import java.util.LinkedHashMap;
+import org.hibernate.annotations.JdbcTypeCode;
+import org.hibernate.type.SqlTypes;
 
 @Entity
 @Table(name = "audit_logs")
@@ -22,6 +26,9 @@ public class AuditLog {
     @Column(name = "target_id", nullable = false)
     private Long targetId;
     private String reason;
+    @JdbcTypeCode(SqlTypes.JSON)
+    @Column(columnDefinition = "jsonb")
+    private Map<String, Object> details;
     @Column(name = "created_at", nullable = false, insertable = false, updatable = false)
     private Instant createdAt;
 
@@ -33,9 +40,17 @@ public class AuditLog {
         this.action = action;
         this.targetType = "EVENT";
         this.reason = reason;
+        this.details = Map.of();
+    }
+
+    public AuditLog(Long eventId, Long actorId, String action, String reason, Map<String, Object> details) {
+        this(eventId, actorId, action, reason);
+        this.details = new LinkedHashMap<>(details);
     }
 
     public Long getId() { return id; }
+    public Long getActorUserId() { return actorUserId; }
+    public Map<String, Object> getDetails() { return details == null ? Map.of() : new LinkedHashMap<>(details); }
     public String getAction() { return action; }
     public String getReason() { return reason; }
     public Instant getCreatedAt() { return createdAt; }

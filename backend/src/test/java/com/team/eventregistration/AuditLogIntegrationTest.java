@@ -15,7 +15,7 @@ import org.springframework.transaction.support.TransactionTemplate;
 import static org.junit.jupiter.api.Assertions.*;
 
 @SpringBootTest(properties = "JWT_SECRET=dGVzdC1vbmx5LXNlY3JldC1mb3ItYXV0aC1pbnRlZ3JhdGlvbi10ZXN0cy0zMi1ieXRlcw==")
-class AuditLogIntegrationTest {
+class AuditLogIntegrationTest extends PostgresTestSupport {
     @Autowired AuditLogService audit;
     @Autowired AuditLogRepository logs;
     @Autowired UserRepository users;

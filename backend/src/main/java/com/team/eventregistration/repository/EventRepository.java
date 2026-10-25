@@ -34,22 +34,20 @@ public interface EventRepository extends JpaRepository<Event, Long> {
 
     long countByDeletedAtIsNull();
 
+    Page<Event> findByOrganizerUserIdOrderByCreatedAtDescIdDesc(Long ownerId, Pageable pageable);
+
     @Modifying
     @Query("UPDATE Event e "
          + "SET e.registeredCount = e.registeredCount + 1 "
          + "WHERE e.id = :eventId "
          + "AND e.status = 'OPEN' "
-         + "AND e.registeredCount < e.capacity "
+         + "AND e.registeredCount + e.heldCount < e.capacity "
          + "AND e.deletedAt IS NULL")
     int incrementRegisteredCountIfCapacityAvailable(
             @Param("eventId") Long eventId);
 
     @Modifying
-    @Query("UPDATE Event e "
-         + "SET e.registeredCount = e.registeredCount - 1 "
-         + "WHERE e.id = :eventId "
-         + "AND e.status = 'OPEN' "
-         + "AND e.registeredCount > 0"
-         + "AND e.deletedAt IS NULL")
+    @Query("UPDATE Event e SET e.registeredCount = e.registeredCount - 1 "
+         + "WHERE e.id = :eventId AND e.registeredCount > 0")
     int decrementRegisteredCount(@Param("eventId") Long eventId);
 }

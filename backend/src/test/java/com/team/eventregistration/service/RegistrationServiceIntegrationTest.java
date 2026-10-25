@@ -1,5 +1,7 @@
 package com.team.eventregistration.service;
 
+import com.team.eventregistration.PostgresTestSupport;
+
 import com.team.eventregistration.entity.*;
 import com.team.eventregistration.repository.EventRepository;
 import com.team.eventregistration.repository.RegistrationRepository;
@@ -24,7 +26,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.*;
 
 @SpringBootTest
-class RegistrationServiceIntegrationTest {
+class RegistrationServiceIntegrationTest extends PostgresTestSupport {
     @Autowired private RegistrationService registrationService;
 
     @Autowired private EventRepository eventRepository;
