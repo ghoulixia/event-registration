@@ -48,4 +48,18 @@ public class RegistrationController {
         List<RegistrationResponse> responses = registrationService.getMyRegistrations(userId);
         return ResponseEntity.ok(responses);
     }
+
+    @DeleteMapping("/registrations/{id}")
+    @Operation(summary = "Cancel a registration", description = "Cancel an authenticated user's registration by ID.")
+    @SecurityRequirement(name = "bearerAuth")
+    @ApiResponse(responseCode = "204", description = "Registration cancelled")
+    @ApiResponse(responseCode = "400", description = "Event has already started or cancellation is not allowed")
+    @ApiResponse(responseCode = "404", description = "Registration not found")
+    public ResponseEntity<Void> cancelRegistration(
+            @PathVariable Long id,
+            @AuthenticationPrincipal Long userId
+    ) {
+        registrationService.cancelRegistration(userId, id);
+        return ResponseEntity.noContent().build();
+    }
 }

@@ -54,6 +54,7 @@ class RegistrationServiceTest {
                 "marisad1234",
                 "09239023",
                 Role.USER);
+        sampleUser.setId(1L);
 
         sampleEvent = new Event();
         sampleEvent.setId(10L);
@@ -360,6 +361,129 @@ class RegistrationServiceTest {
 
             verify(userRepository).findById(1L);
             verify(registrationRepository).findByUser_Id(1L);
+        }
+    }
+
+    @Nested
+    @DisplayName("cancelRegistration")
+    class CancelRegistration {
+
+        @Test
+        @DisplayName("Cancels a confirmed registration and releases its event slot")
+        void shouldCancelRegistration() {
+            Registration registration = new Registration(sampleUser, sampleEvent);
+            when(registrationRepository.findById(20L)).thenReturn(Optional.of(registration));
+            when(eventRepository.findByIdForUpdate(10L)).thenReturn(Optional.of(sampleEvent));
+            when(registrationRepository.cancelConfirmedRegistration(20L, 1L)).thenReturn(1);
+            when(eventRepository.decrementRegisteredCount(10L)).thenReturn(1);
+
+            registrationService.cancelRegistration(1L, 20L);
+
+            verify(eventRepository).findByIdForUpdate(10L);
+            verify(registrationRepository).cancelConfirmedRegistration(20L, 1L);
+            verify(eventRepository).decrementRegisteredCount(10L);
+        }
+
+        @Test
+        @DisplayName("Does not release a slot when registration is already cancelled")
+        void shouldBeIdempotentForCancelledRegistration() {
+            Registration registration = new Registration(sampleUser, sampleEvent);
+            registration.cancel();
+            when(registrationRepository.findById(20L)).thenReturn(Optional.of(registration));
+            when(eventRepository.findByIdForUpdate(10L)).thenReturn(Optional.of(sampleEvent));
+
+            registrationService.cancelRegistration(1L, 20L);
+
+            assertEquals(RegistrationStatus.CANCELLED, registration.getStatus());
+            verify(eventRepository, never()).decrementRegisteredCount(anyLong());
+            verify(registrationRepository, never()).cancelConfirmedRegistration(anyLong(), anyLong());
+        }
+
+        @Test
+        @DisplayName("Throws ResourceNotFoundException when registration does not belong to user")
+        void shouldNotCancelAnotherUsersRegistration() {
+            User anotherUser = new User(
+                    "another@example.com", "Another User", "password", "0912345678", Role.USER);
+            Registration registration = new Registration(anotherUser, sampleEvent);
+            when(registrationRepository.findById(20L)).thenReturn(Optional.of(registration));
+
+            assertThrows(
+                    ResourceNotFoundException.class,
+                    () -> registrationService.cancelRegistration(1L, 20L)
+            );
+
+            verify(eventRepository, never()).findByIdForUpdate(anyLong());
+            verify(eventRepository, never()).decrementRegisteredCount(anyLong());
+            verify(registrationRepository, never()).cancelConfirmedRegistration(anyLong(), anyLong());
+        }
+
+        @Test
+        @DisplayName("Throws ResourceNotFoundException when registration does not exist")
+        void shouldThrowWhenRegistrationDoesNotExist() {
+            when(registrationRepository.findById(20L)).thenReturn(Optional.empty());
+
+            assertThrows(
+                    ResourceNotFoundException.class,
+                    () -> registrationService.cancelRegistration(1L, 20L)
+            );
+
+            verify(eventRepository, never()).findByIdForUpdate(anyLong());
+            verify(eventRepository, never()).decrementRegisteredCount(anyLong());
+            verify(registrationRepository, never()).cancelConfirmedRegistration(anyLong(), anyLong());
+        }
+
+        @Test
+        @DisplayName("Rejects cancellation after the event has started")
+        void shouldRejectCancellationAfterEventStarts() {
+            Registration registration = new Registration(sampleUser, sampleEvent);
+            sampleEvent.setStartTime(LocalDateTime.now().minusMinutes(1));
+            when(registrationRepository.findById(20L)).thenReturn(Optional.of(registration));
+            when(eventRepository.findByIdForUpdate(10L)).thenReturn(Optional.of(sampleEvent));
+
+            assertThrows(
+                    BusinessRuleException.class,
+                    () -> registrationService.cancelRegistration(1L, 20L)
+            );
+
+            verify(registrationRepository, never()).cancelConfirmedRegistration(anyLong(), anyLong());
+            verify(eventRepository, never()).decrementRegisteredCount(anyLong());
+        }
+
+        @Test
+        @DisplayName("Rolls back when the event counter cannot be decremented")
+        void shouldFailWhenCounterUpdateDoesNotAffectOneRow() {
+            Registration registration = new Registration(sampleUser, sampleEvent);
+            when(registrationRepository.findById(20L)).thenReturn(Optional.of(registration));
+            when(eventRepository.findByIdForUpdate(10L)).thenReturn(Optional.of(sampleEvent));
+            when(registrationRepository.cancelConfirmedRegistration(20L, 1L)).thenReturn(1);
+            when(eventRepository.decrementRegisteredCount(10L)).thenReturn(0);
+
+            assertThrows(
+                    BusinessRuleException.class,
+                    () -> registrationService.cancelRegistration(1L, 20L)
+            );
+
+            verify(registrationRepository).cancelConfirmedRegistration(20L, 1L);
+            verify(eventRepository).decrementRegisteredCount(10L);
+        }
+
+        @Test
+        @DisplayName("Rejects an unexpected registration state")
+        void shouldRejectUnexpectedRegistrationState() {
+            Registration registration = mock(Registration.class);
+            when(registration.getUser()).thenReturn(sampleUser);
+            when(registration.getStatus()).thenReturn(null);
+            when(registration.getEvent()).thenReturn(sampleEvent);
+            when(registrationRepository.findById(20L)).thenReturn(Optional.of(registration));
+            when(eventRepository.findByIdForUpdate(10L)).thenReturn(Optional.of(sampleEvent));
+
+            assertThrows(
+                    BusinessRuleException.class,
+                    () -> registrationService.cancelRegistration(1L, 20L)
+            );
+
+            verify(registrationRepository, never()).cancelConfirmedRegistration(anyLong(), anyLong());
+            verify(eventRepository, never()).decrementRegisteredCount(anyLong());
         }
     }
 }
