@@ -1,0 +1,5 @@
+package com.team.eventregistration.dto;
+
+import jakarta.validation.constraints.NotBlank;
+
+public record EventStatusRequest(@NotBlank String status) {}

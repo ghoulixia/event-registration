@@ -2,299 +2,318 @@ package com.team.eventregistration.service;
 
 import com.team.eventregistration.dto.CreateEventRequest;
 import com.team.eventregistration.dto.EventResponse;
+import com.team.eventregistration.dto.ParticipantRemoval;
 import com.team.eventregistration.dto.UpdateEventRequest;
-import com.team.eventregistration.entity.Category;
-import com.team.eventregistration.entity.City;
-import com.team.eventregistration.entity.Event;
-import com.team.eventregistration.entity.EventStatus;
-import com.team.eventregistration.exception.BusinessRuleException;
+import com.team.eventregistration.entity.*;
+import com.team.eventregistration.exception.EventConflictException;
 import com.team.eventregistration.exception.ResourceNotFoundException;
-import com.team.eventregistration.repository.EventRepository;
+import com.team.eventregistration.service.port.*;
 import org.junit.jupiter.api.BeforeEach;
-import org.junit.jupiter.api.DisplayName;
-import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
-import org.springframework.data.domain.Page;
-import org.springframework.data.domain.PageImpl;
-import org.springframework.data.domain.Pageable;
-
+import org.springframework.security.access.AccessDeniedException;
 import java.io.ByteArrayInputStream;
-import java.time.LocalDateTime;
-import java.util.List;
-import java.util.Optional;
-
+import java.time.*;
+import java.util.*;
 import static org.junit.jupiter.api.Assertions.*;
-import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 
 @ExtendWith(MockitoExtension.class)
 class EventServiceTest {
-
-    @Mock private EventRepository eventRepository;
-    @Mock private ImageStorageService imageStorageService;
-
-    private EventService eventService;
-    private Event sampleEvent;
+    @Mock EventStore events;
+    @Mock UserStore users;
+    @Mock ImageStorageService images;
+    @Mock EventParticipation participation;
+    @Mock AuditLogService audit;
+    final Clock clock = Clock.fixed(Instant.parse("2030-01-01T00:00:00Z"), ZoneId.of("Asia/Ho_Chi_Minh"));
+    EventService service;
+    Event event;
 
     @BeforeEach
     void setUp() {
-        eventService = new EventService(eventRepository, imageStorageService, "/api/uploads/thumbnails/");
-
-        sampleEvent = new Event();
-        sampleEvent.setId(1L);
-        sampleEvent.setTitle("AI Summit 2026");
-        sampleEvent.setDescription("AI Conference");
-        sampleEvent.setOrganizerName("Tech Corp");
-        sampleEvent.setCity(City.HANOI);
-        sampleEvent.setCategory(Category.TECHNOLOGY);
-        sampleEvent.setStartTime(LocalDateTime.now().plusDays(30));
-        sampleEvent.setEndTime(LocalDateTime.now().plusDays(30).plusHours(8));
-        sampleEvent.setCapacity(200);
-        sampleEvent.setRegisteredCount(45);
-        sampleEvent.setStatus(EventStatus.OPEN);
-        sampleEvent.setThumbnailPath("test-thumb.jpg");
+        service = new EventService(events, users, images, participation, audit, clock, "/api/uploads/thumbnails/");
+        event = new Event();
+        event.setId(1L);
+        event.setOrganizerUserId(42L);
+        event.setTitle("Workshop");
+        event.setOrganizerName("Community");
+        event.setCity(City.HANOI);
+        event.setCategory(Category.EDUCATION);
+        event.setStartTime(now().plusHours(2));
+        event.setEndTime(now().plusHours(4));
+        event.setCapacity(100);
+        event.setRegisteredCount(40);
+        event.setHeldCount(10);
+        event.setThumbnailPath("old.png");
+        User owner = new User("owner@example.com", "Owner", "hash", null, Role.USER);
+        owner.setId(42L);
+        User other = new User("other@example.com", "Other", "hash", null, Role.USER);
+        other.setId(7L);
+        lenient().when(users.find(42L)).thenReturn(Optional.of(owner));
+        lenient().when(users.find(7L)).thenReturn(Optional.of(other));
+        lenient().when(events.find(1L)).thenReturn(Optional.of(event));
+        lenient().when(events.lock(1L)).thenReturn(Optional.of(event));
+        lenient().when(events.save(any())).thenAnswer(invocation -> {
+            Event saved = invocation.getArgument(0);
+            if (saved.getId() == null) saved.setId(10L);
+            return saved;
+        });
     }
 
-    @Nested
-    @DisplayName("getEventDetail")
-    class GetEventDetail {
+    LocalDateTime now() { return LocalDateTime.now(clock); }
 
-        @Test
-        @DisplayName("Returns computed fields correctly")
-        void shouldReturnComputedFields() {
-            when(eventRepository.findByIdAndDeletedAtIsNull(1L)).thenReturn(Optional.of(sampleEvent));
-            EventResponse r = eventService.getEventDetail(1L);
-
-            assertEquals("OPEN", r.getEffectiveStatus());
-            assertEquals(155, r.getRemainingSlots());
-            assertTrue(r.getCanRegister());
-            assertEquals("/api/uploads/thumbnails/test-thumb.jpg", r.getThumbnailUrl());
-        }
-
-        @Test
-        @DisplayName("CLOSED when start time has passed")
-        void shouldReturnClosedWhenPastStartTime() {
-            sampleEvent.setStartTime(LocalDateTime.now().minusHours(1));
-            when(eventRepository.findByIdAndDeletedAtIsNull(1L)).thenReturn(Optional.of(sampleEvent));
-
-            EventResponse r = eventService.getEventDetail(1L);
-            assertEquals("CLOSED", r.getEffectiveStatus());
-            assertFalse(r.getCanRegister());
-        }
-
-        @Test
-        @DisplayName("CLOSED when status is CLOSED")
-        void shouldReturnClosedWhenStatusClosed() {
-            sampleEvent.setStatus(EventStatus.CLOSED);
-            when(eventRepository.findByIdAndDeletedAtIsNull(1L)).thenReturn(Optional.of(sampleEvent));
-
-            assertEquals("CLOSED", eventService.getEventDetail(1L).getEffectiveStatus());
-        }
-
-        @Test
-        @DisplayName("canRegister false when full")
-        void shouldNotRegisterWhenFull() {
-            sampleEvent.setRegisteredCount(200);
-            when(eventRepository.findByIdAndDeletedAtIsNull(1L)).thenReturn(Optional.of(sampleEvent));
-
-            EventResponse r = eventService.getEventDetail(1L);
-            assertEquals(0, r.getRemainingSlots());
-            assertFalse(r.getCanRegister());
-        }
-
-        @Test
-        @DisplayName("Throws when not found")
-        void shouldThrowWhenNotFound() {
-            when(eventRepository.findByIdAndDeletedAtIsNull(99L)).thenReturn(Optional.empty());
-            assertThrows(ResourceNotFoundException.class, () -> eventService.getEventDetail(99L));
-        }
+    CreateEventRequest create() {
+        CreateEventRequest request = new CreateEventRequest();
+        request.setTitle("New event");
+        request.setOrganizerName("Community");
+        request.setCity("HANOI");
+        request.setCategory("MUSIC");
+        request.setStartTime(now().plusDays(1));
+        request.setEndTime(now().plusDays(1).plusHours(3));
+        request.setCapacity(100);
+        request.setOfferTtlMinutes(15);
+        return request;
     }
 
-    @Nested
-    @DisplayName("filterEvents")
-    class FilterEvents {
-
-        @Test
-        @DisplayName("Delegates with parsed enum filters")
-        void shouldDelegate() {
-            when(eventRepository.findByFilters(eq("AI"), eq(City.HANOI), eq(Category.TECHNOLOGY), any(Pageable.class)))
-                    .thenReturn(new PageImpl<>(List.of(sampleEvent)));
-
-            Page<EventResponse> result = eventService.filterEvents("AI", "HANOI", "TECHNOLOGY", 0, 12, "startTime");
-            assertEquals(1, result.getTotalElements());
-        }
+    UpdateEventRequest update() {
+        UpdateEventRequest request = new UpdateEventRequest();
+        request.setTitle("Updated event");
+        request.setOrganizerName(event.getOrganizerName());
+        request.setCity(event.getCity().name());
+        request.setCategory(event.getCategory().name());
+        request.setStartTime(event.getStartTime());
+        request.setEndTime(event.getEndTime());
+        request.setCapacity(event.getCapacity());
+        request.setOfferTtlMinutes(event.getOfferTtlMinutes());
+        return request;
     }
 
-    @Nested
-    @DisplayName("createEvent")
-    class CreateEvent {
-
-        @Test
-        @DisplayName("Creates with OPEN status and captures saved entity")
-        void shouldCreate() {
-            CreateEventRequest req = new CreateEventRequest();
-            req.setTitle("New Event"); req.setOrganizerName("Org");
-            req.setCity("HANOI"); req.setCategory("SPORTS");
-            req.setStartTime(LocalDateTime.now().plusDays(7));
-            req.setEndTime(LocalDateTime.now().plusDays(7).plusHours(3));
-            req.setCapacity(100);
-
-            when(eventRepository.save(any(Event.class))).thenAnswer(inv -> {
-                Event e = inv.getArgument(0); e.setId(10L); return e;
-            });
-
-            EventResponse res = eventService.createEvent(req);
-            assertNotNull(res);
-
-            ArgumentCaptor<Event> captor = ArgumentCaptor.forClass(Event.class);
-            verify(eventRepository).save(captor.capture());
-            Event saved = captor.getValue();
-            assertEquals(EventStatus.OPEN, saved.getStatus());
-            assertEquals(0, saved.getRegisteredCount());
-            assertEquals("New Event", saved.getTitle());
-            assertEquals(100, saved.getCapacity());
-        }
-
-        @Test
-        @DisplayName("Throws when endTime <= startTime")
-        void shouldThrowOnBadTime() {
-            CreateEventRequest req = new CreateEventRequest();
-            req.setTitle("Bad"); req.setOrganizerName("Org");
-            req.setCity("HANOI"); req.setCategory("SPORTS");
-            req.setStartTime(LocalDateTime.now().plusDays(7));
-            req.setEndTime(LocalDateTime.now().plusDays(6));
-            req.setCapacity(50);
-
-            assertThrows(BusinessRuleException.class, () -> eventService.createEvent(req));
-        }
+    @Test
+    void availabilitySubtractsBothConfirmedAndHeldPlaces() {
+        EventResponse response = service.getEventDetail(1L);
+        assertEquals(50, response.getRemainingSlots());
+        assertTrue(response.getCanRegister());
+        when(participation.waitingCount(event)).thenReturn(50L);
+        assertFalse(service.getEventDetail(1L).getCanRegister());
     }
 
-    @Nested
-    @DisplayName("updateEvent")
-    class UpdateEvent {
-
-        @Test
-        @DisplayName("Updates event successfully")
-        void shouldUpdateSuccessfully() {
-            when(eventRepository.findByIdAndDeletedAtIsNull(1L)).thenReturn(Optional.of(sampleEvent));
-            when(eventRepository.save(any(Event.class))).thenAnswer(inv -> inv.getArgument(0));
-
-            UpdateEventRequest req = new UpdateEventRequest();
-            req.setTitle("Updated Title"); req.setOrganizerName("New Org");
-            req.setCity("HCMC"); req.setCategory("EDUCATION");
-            req.setStartTime(LocalDateTime.now().plusDays(40));
-            req.setEndTime(LocalDateTime.now().plusDays(40).plusHours(4));
-            req.setCapacity(300);
-
-            EventResponse res = eventService.updateEvent(1L, req);
-            assertEquals("Updated Title", res.getTitle());
-            assertEquals("HCMC", res.getCity());
-            assertEquals("EDUCATION", res.getCategory());
-            assertEquals(300, res.getCapacity());
-        }
-
-        @Test
-        @DisplayName("Throws when reducing capacity below registered")
-        void shouldThrowOnCapacityViolation() {
-            when(eventRepository.findByIdAndDeletedAtIsNull(1L)).thenReturn(Optional.of(sampleEvent));
-
-            UpdateEventRequest req = new UpdateEventRequest();
-            req.setTitle("U"); req.setOrganizerName("O");
-            req.setCity("HANOI"); req.setCategory("TECHNOLOGY");
-            req.setStartTime(LocalDateTime.now().plusDays(30));
-            req.setEndTime(LocalDateTime.now().plusDays(30).plusHours(8));
-            req.setCapacity(10);
-
-            assertThrows(BusinessRuleException.class, () -> eventService.updateEvent(1L, req));
-        }
-
-        @Test
-        @DisplayName("Throws when setting start time in past while open")
-        void shouldThrowWhenSettingPastStartTimeWhileOpen() {
-            when(eventRepository.findByIdAndDeletedAtIsNull(1L)).thenReturn(Optional.of(sampleEvent));
-
-            UpdateEventRequest req = new UpdateEventRequest();
-            req.setTitle("U"); req.setOrganizerName("O");
-            req.setCity("HANOI"); req.setCategory("TECHNOLOGY");
-            req.setStartTime(LocalDateTime.now().minusDays(1));
-            req.setEndTime(LocalDateTime.now().plusDays(1));
-            req.setCapacity(200);
-
-            assertThrows(BusinessRuleException.class, () -> eventService.updateEvent(1L, req));
-        }
+    @Test
+    void injectedClockClosesAvailabilityAtTheExactStart() {
+        event.setStartTime(now());
+        assertEquals("CLOSED", service.getEventDetail(1L).getEffectiveStatus());
+        assertFalse(service.getEventDetail(1L).getCanRegister());
     }
 
-    @Nested
-    @DisplayName("updateStatus")
-    class UpdateStatus {
-
-        @Test
-        @DisplayName("Updates status to CLOSED")
-        void shouldUpdateStatus() {
-            when(eventRepository.findByIdAndDeletedAtIsNull(1L)).thenReturn(Optional.of(sampleEvent));
-            when(eventRepository.save(any(Event.class))).thenAnswer(inv -> inv.getArgument(0));
-
-            EventResponse res = eventService.updateStatus(1L, "CLOSED");
-            assertEquals("CLOSED", res.getEffectiveStatus());
-            verify(eventRepository).save(sampleEvent);
-        }
-
-        @Test
-        @DisplayName("Throws on invalid status string")
-        void shouldThrowOnInvalidStatus() {
-            when(eventRepository.findByIdAndDeletedAtIsNull(1L)).thenReturn(Optional.of(sampleEvent));
-            assertThrows(BusinessRuleException.class, () -> eventService.updateStatus(1L, "INVALID"));
-        }
+    @Test
+    void deletedEventIsHiddenFromPublicReads() {
+        event.setDeletedAt(now());
+        assertThrows(ResourceNotFoundException.class, () -> service.getEventDetail(1L));
+        assertNotNull(service.getOwnedEvent(42L, 1L).getDeletedAt());
     }
 
-    @Nested
-    @DisplayName("uploadThumbnail")
-    class UploadThumbnail {
-
-        @Test
-        @DisplayName("Deletes old thumbnail, stores new one and saves event")
-        void shouldUploadThumbnail() {
-            when(eventRepository.findByIdAndDeletedAtIsNull(1L)).thenReturn(Optional.of(sampleEvent));
-            when(imageStorageService.store(any(), eq("new.png"), eq("image/png"), eq(100L))).thenReturn("new-uuid.png");
-            when(eventRepository.save(any(Event.class))).thenAnswer(inv -> inv.getArgument(0));
-
-            ByteArrayInputStream in = new ByteArrayInputStream(new byte[100]);
-            EventResponse res = eventService.uploadThumbnail(1L, in, "new.png", "image/png", 100L);
-
-            verify(imageStorageService).delete("test-thumb.jpg");
-            verify(imageStorageService).store(any(), eq("new.png"), eq("image/png"), eq(100L));
-            assertEquals("/api/uploads/thumbnails/new-uuid.png", res.getThumbnailUrl());
-        }
+    @Test
+    void creationUsesTheAuthenticatedOwnerAndStartsWithEmptyInventory() {
+        EventResponse response = service.createEvent(42L, create());
+        ArgumentCaptor<Event> saved = ArgumentCaptor.forClass(Event.class);
+        verify(events).save(saved.capture());
+        assertEquals(42L, saved.getValue().getOrganizerUserId());
+        assertEquals(0, saved.getValue().getRegisteredCount());
+        assertEquals(0, saved.getValue().getHeldCount());
+        assertEquals(EventStatus.OPEN, saved.getValue().getStatus());
+        assertEquals(15, response.getOfferTtlMinutes());
+        assertEquals(now(), response.getCreatedAt());
+        verify(audit).recordEventAction(eq(10L), eq(42L), eq("EVENT_CREATE"), isNull(), anyMap());
     }
 
-    @Nested
-    @DisplayName("softDeleteEvent")
-    class SoftDelete {
-
-        @Test
-        @DisplayName("Sets deletedAt and status to CLOSED")
-        void shouldSoftDelete() {
-            when(eventRepository.findById(1L)).thenReturn(Optional.of(sampleEvent));
-            eventService.softDeleteEvent(1L);
-
-            assertNotNull(sampleEvent.getDeletedAt());
-            assertEquals(EventStatus.CLOSED, sampleEvent.getStatus());
-            verify(eventRepository).save(sampleEvent);
+    @Test
+    void eventValidationRejectsTtlOutsideTheConfiguredRange() {
+        for (int ttl : new int[]{4, 31}) {
+            CreateEventRequest request = create();
+            request.setOfferTtlMinutes(ttl);
+            assertThrows(IllegalArgumentException.class, () -> service.createEvent(42L, request));
         }
+        verify(events, never()).save(any());
+    }
 
-        @Test
-        @DisplayName("Idempotent on already deleted")
-        void shouldBeIdempotent() {
-            sampleEvent.setDeletedAt(LocalDateTime.now().minusDays(1));
-            when(eventRepository.findById(1L)).thenReturn(Optional.of(sampleEvent));
+    @Test
+    void anotherUserCannotReadOwnerDataOrMutateTheEvent() {
+        assertThrows(AccessDeniedException.class, () -> service.participants(7L, 1L));
+        assertThrows(AccessDeniedException.class, () -> service.ownerWaitlist(7L, 1L));
+        assertThrows(AccessDeniedException.class, () -> service.auditHistory(7L, 1L));
+        assertThrows(AccessDeniedException.class, () -> service.updateEvent(7L, 1L, update()));
+        assertThrows(AccessDeniedException.class, () -> service.updateStatus(7L, 1L, "CLOSED"));
+        assertThrows(AccessDeniedException.class, () -> service.softDeleteEvent(7L, 1L, "Reason"));
+        assertThrows(AccessDeniedException.class, () -> service.uploadThumbnail(7L, 1L,
+                new ByteArrayInputStream(new byte[]{1}), "new.png", "image/png", 1));
+        verifyNoInteractions(images, participation, audit);
+    }
 
-            eventService.softDeleteEvent(1L);
-            verify(eventRepository, never()).save(any());
-        }
+    @Test
+    void legacyEventWithoutAnOwnerCannotBeClaimedByAUser() {
+        event.setOrganizerUserId(null);
+        assertThrows(AccessDeniedException.class, () -> service.updateEvent(42L, 1L, update()));
+        assertThrows(AccessDeniedException.class, () -> service.getOwnedEvent(42L, 1L));
+    }
+
+    @Test
+    void capacityCannotFallBelowConfirmedPlusHeldPlaces() {
+        UpdateEventRequest request = update();
+        request.setCapacity(49);
+        assertThrows(EventConflictException.class, () -> service.updateEvent(42L, 1L, request));
+        assertEquals(100, event.getCapacity());
+        verify(events, never()).save(any());
+    }
+
+    @Test
+    void occupancyComparisonDoesNotOverflowAnInteger() {
+        event.setCapacity(Integer.MAX_VALUE);
+        event.setRegisteredCount(Integer.MAX_VALUE);
+        event.setHeldCount(1);
+        assertThrows(EventConflictException.class, () -> service.updateEvent(42L, 1L, update()));
+    }
+
+    @Test
+    void increasingCapacityCallsAllocationBeforeTheAuditWrite() {
+        UpdateEventRequest request = update();
+        request.setCapacity(120);
+        service.updateEvent(42L, 1L, request);
+        var order = inOrder(events, participation, audit);
+        order.verify(events).lock(1L);
+        order.verify(participation).afterCapacityIncrease(event, now());
+        order.verify(events).save(event);
+        order.verify(audit).recordEventAction(eq(1L), eq(42L), eq("EVENT_UPDATE"), isNull(), anyMap());
+    }
+
+    @Test
+    void updatingTtlDoesNotInvokeAllocation() {
+        UpdateEventRequest request = update();
+        request.setOfferTtlMinutes(30);
+        service.updateEvent(42L, 1L, request);
+        assertEquals(30, event.getOfferTtlMinutes());
+        verify(participation, never()).latestPendingExpiry(any());
+        verify(participation, never()).afterCapacityIncrease(any(), any());
+    }
+
+    @Test
+    void startCannotMoveEarlierThanAnOutstandingOfferDeadline() {
+        when(participation.latestPendingExpiry(event)).thenReturn(Optional.of(now().plusMinutes(20)));
+        UpdateEventRequest request = update();
+        request.setStartTime(now().plusMinutes(10));
+        assertThrows(EventConflictException.class, () -> service.updateEvent(42L, 1L, request));
+        assertEquals(now().plusHours(2), event.getStartTime());
+    }
+
+    @Test
+    void startedEventCannotBeRescheduledButItsMetadataCanChange() {
+        event.setStartTime(now().minusMinutes(1));
+        UpdateEventRequest rescheduled = update();
+        rescheduled.setStartTime(now().plusHours(1));
+        assertThrows(EventConflictException.class, () -> service.updateEvent(42L, 1L, rescheduled));
+        service.updateEvent(42L, 1L, update());
+        assertEquals("Updated event", event.getTitle());
+        assertEquals(now().minusMinutes(1), event.getStartTime());
+    }
+
+    @Test
+    void reopeningChecksTimeAfterTheEventLockHasBeenAcquired() {
+        MutableClock advancing = new MutableClock(clock.instant());
+        EventService waitingService = new EventService(events, users, images, participation, audit,
+                advancing, "/api/uploads/thumbnails/");
+        event.setStatus(EventStatus.CLOSED);
+        event.setStartTime(LocalDateTime.now(advancing).plusSeconds(1));
+        when(events.lock(1L)).thenAnswer(invocation -> {
+            advancing.advance(Duration.ofSeconds(1));
+            return Optional.of(event);
+        });
+        assertThrows(EventConflictException.class, () -> waitingService.updateStatus(42L, 1L, "OPEN"));
+        assertEquals(EventStatus.CLOSED, event.getStatus());
+        verify(participation, never()).reopen(any(), any());
+    }
+
+    @Test
+    void closingPassesTheClosedStateToTheLifecycleHandler() {
+        doAnswer(invocation -> {
+            assertEquals(EventStatus.CLOSED, event.getStatus());
+            return null;
+        }).when(participation).close(event, now());
+        service.updateStatus(42L, 1L, "CLOSED");
+        verify(participation).close(event, now());
+        verify(audit).recordEventAction(eq(1L), eq(42L), eq("EVENT_CLOSE"), isNull(), anyMap());
+    }
+
+    @Test
+    void deletionRequiresAReasonAndRetainsTheEventRow() {
+        assertThrows(IllegalArgumentException.class, () -> service.softDeleteEvent(42L, 1L, " "));
+        assertNull(event.getDeletedAt());
+        service.softDeleteEvent(42L, 1L, " Venue unavailable ");
+        assertEquals(now(), event.getDeletedAt());
+        assertEquals(EventStatus.CLOSED, event.getStatus());
+        verify(participation).delete(event, now());
+        verify(audit).recordEventAction(eq(1L), eq(42L), eq("EVENT_DELETE"), eq("Venue unavailable"), anyMap());
+    }
+
+    @Test
+    void repeatingDeletionDoesNotWriteAnotherAuditEntry() {
+        event.setDeletedAt(now());
+        service.softDeleteEvent(42L, 1L, "Same request");
+        verifyNoInteractions(participation, audit);
+    }
+
+    @Test
+    void removingAConfirmedParticipantRecordsItsIdentity() {
+        when(participation.removeParticipant(event, 5L, 42L, "Duplicate", now()))
+                .thenReturn(new ParticipantRemoval(5L, 7L, true));
+        service.removeParticipant(42L, 1L, 5L, "Duplicate");
+        verify(audit).recordEventAction(eq(1L), eq(42L), eq("PARTICIPANT_REMOVE"), eq("Duplicate"),
+                argThat(details -> details.get("registrationId").equals(5L)
+                        && details.get("userId").equals(7L)
+                        && details.get("afterStatus").equals("REMOVED")));
+    }
+
+    @Test
+    void repeatingRemovalDoesNotRecordAnotherTransition() {
+        when(participation.removeParticipant(event, 5L, 42L, "Duplicate", now()))
+                .thenReturn(new ParticipantRemoval(5L, 7L, false));
+        service.removeParticipant(42L, 1L, 5L, "Duplicate");
+        verifyNoInteractions(audit);
+    }
+
+    @Test
+    void participantCannotBeRemovedAtTheExactEventStart() {
+        event.setStartTime(now());
+        assertThrows(EventConflictException.class, () -> service.removeParticipant(42L, 1L, 5L, "Reason"));
+        verifyNoInteractions(participation, audit);
+    }
+
+    @Test
+    void failedStorageLeavesThePreviousThumbnailUntouched() {
+        when(images.store(any(), anyString(), anyString(), anyLong())).thenThrow(new IllegalStateException("Storage unavailable"));
+        assertThrows(IllegalStateException.class, () -> service.uploadThumbnail(42L, 1L,
+                new ByteArrayInputStream(new byte[]{1}), "new.png", "image/png", 1));
+        assertEquals("old.png", event.getThumbnailPath());
+        verify(images, never()).delete("old.png");
+    }
+
+    @Test
+    void paginationUsesTheDataPortAndCapsPageSize() {
+        when(events.search(eq("work"), eq(City.HANOI), eq(Category.EDUCATION), eq(0), eq(50), eq("startTime")))
+                .thenReturn(new PageResult<>(List.of(event), 1, 0, 50));
+        var result = service.filterEvents(" work ", "HANOI", "EDUCATION", 0, 1000, "startTime");
+        assertEquals(1, result.totalElements());
+        assertEquals(50, result.size());
+        assertEquals(1L, result.content().getFirst().getId());
+    }
+
+    static class MutableClock extends Clock {
+        private Instant value;
+        MutableClock(Instant value) { this.value = value; }
+        @Override public ZoneId getZone() { return ZoneId.of("Asia/Ho_Chi_Minh"); }
+        @Override public Clock withZone(ZoneId zone) { return Clock.fixed(value, zone); }
+        @Override public Instant instant() { return value; }
+        void advance(Duration duration) { value = value.plus(duration); }
     }
 }

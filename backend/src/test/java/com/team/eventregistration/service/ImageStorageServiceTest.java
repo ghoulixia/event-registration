@@ -1,6 +1,5 @@
 package com.team.eventregistration.service;
 
-import com.team.eventregistration.exception.BusinessRuleException;
 import com.team.eventregistration.exception.FileStorageException;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -45,15 +44,28 @@ class ImageStorageServiceTest {
     @Test
     @DisplayName("Rejects unsupported MIME type")
     void shouldRejectBadMime() {
-        assertThrows(BusinessRuleException.class, () ->
+        assertThrows(IllegalArgumentException.class, () ->
                 service.store(new ByteArrayInputStream("x".getBytes()), "t.txt", "text/plain", 1));
     }
 
     @Test
     @DisplayName("Rejects oversized file")
     void shouldRejectOversized() {
-        assertThrows(BusinessRuleException.class, () ->
+        assertThrows(IllegalArgumentException.class, () ->
                 service.store(new ByteArrayInputStream("x".getBytes()), "l.jpg", "image/jpeg", 6L * 1024 * 1024));
+    }
+
+    @Test
+    void failedReadDoesNotLeaveAPartialImage() throws IOException {
+        var broken = new java.io.InputStream() {
+            int bytes;
+            @Override public int read() throws IOException {
+                if (bytes++ < 3) return 1;
+                throw new IOException("Interrupted upload");
+            }
+        };
+        assertThrows(FileStorageException.class, () -> service.store(broken,"photo.png","image/png",10));
+        try (var files = Files.list(tempDir)) { assertEquals(0,files.count()); }
     }
 
     @Test

@@ -35,6 +35,13 @@ public class CreateEventRequest {
     @Min(value = 1, message = "Capacity must be at least 1")
     private Integer capacity;
 
+    @Min(5)
+    @jakarta.validation.constraints.Max(30)
+    private Integer offerTtlMinutes = 10;
+
+    public Integer getOfferTtlMinutes() { return offerTtlMinutes; }
+    public void setOfferTtlMinutes(Integer offerTtlMinutes) { this.offerTtlMinutes = offerTtlMinutes; }
+
     public String getTitle() { return title; }
     public void setTitle(String title) { this.title = title; }
 

@@ -6,7 +6,7 @@ import com.team.eventregistration.service.EventService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import io.swagger.v3.oas.annotations.tags.Tag;
-import org.springframework.data.domain.Page;
+import com.team.eventregistration.service.port.PageResult;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.ModelAttribute;
@@ -28,8 +28,8 @@ public class EventController {
     @GetMapping
     @Operation(summary = "List events", description = "Filter by keyword, city, category with pagination.")
     @ApiResponse(responseCode = "200", description = "Paginated list of events")
-    public ResponseEntity<Page<EventResponse>> getEvents(@ModelAttribute EventSearchRequest request) {
-        Page<EventResponse> result = eventService.filterEvents(
+    public ResponseEntity<PageResult<EventResponse>> getEvents(@ModelAttribute EventSearchRequest request) {
+        PageResult<EventResponse> result = eventService.filterEvents(
                 request.getKeyword(), request.getCity(), request.getCategory(),
                 request.getPage(), request.getSize(), request.getSort());
         return ResponseEntity.ok(result);

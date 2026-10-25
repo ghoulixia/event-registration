@@ -8,12 +8,17 @@ public class EventResponse {
     private String title;
     private String description;
     private String organizerName;
+    private Long organizerUserId;
+    private String status;
+    private int offerTtlMinutes;
+    private LocalDateTime deletedAt;
     private String city;
     private String category;
     private LocalDateTime startTime;
     private LocalDateTime endTime;
     private Integer capacity;
     private Integer registeredCount;
+    private Integer heldCount;
     private Integer remainingSlots;
     private String effectiveStatus;
     private Boolean canRegister;
@@ -32,6 +37,14 @@ public class EventResponse {
 
     public String getOrganizerName() { return organizerName; }
     public void setOrganizerName(String organizerName) { this.organizerName = organizerName; }
+    public Long getOrganizerUserId() { return organizerUserId; }
+    public void setOrganizerUserId(Long organizerUserId) { this.organizerUserId = organizerUserId; }
+    public String getStatus() { return status; }
+    public void setStatus(String status) { this.status = status; }
+    public int getOfferTtlMinutes() { return offerTtlMinutes; }
+    public void setOfferTtlMinutes(int offerTtlMinutes) { this.offerTtlMinutes = offerTtlMinutes; }
+    public LocalDateTime getDeletedAt() { return deletedAt; }
+    public void setDeletedAt(LocalDateTime deletedAt) { this.deletedAt = deletedAt; }
 
     public String getCity() { return city; }
     public void setCity(String city) { this.city = city; }
@@ -49,6 +62,8 @@ public class EventResponse {
     public void setCapacity(Integer capacity) { this.capacity = capacity; }
 
     public Integer getRegisteredCount() { return registeredCount; }
+    public Integer getHeldCount() { return heldCount; }
+    public void setHeldCount(Integer heldCount) { this.heldCount = heldCount; }
     public void setRegisteredCount(Integer registeredCount) { this.registeredCount = registeredCount; }
 
     public Integer getRemainingSlots() { return remainingSlots; }
