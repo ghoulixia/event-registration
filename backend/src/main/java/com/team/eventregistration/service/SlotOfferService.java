@@ -79,6 +79,20 @@ public class SlotOfferService {
         return offerNextWaitingEntry(eventId);
     }
 
+    @Transactional
+    public void allocateAvailableSlotsToWaitlist(Long eventId) {
+        Event event = lockEvent(eventId);
+        LocalDateTime now = now();
+        if (!isOpenAndUpcoming(event, now)) {
+            return;
+        }
+
+        while (availableSlots(event) > 0
+                && offerNextWaitingEntry(event, now).isPresent()) {
+            // Allocate every available slot before direct registration can use one.
+        }
+    }
+
     @Transactional(
             propagation = Propagation.REQUIRES_NEW,
             noRollbackFor = SlotOfferOutcomeException.class

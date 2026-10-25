@@ -40,7 +40,7 @@ public class WaitlistService {
     public WaitlistEntryResponse joinWaitlist(Long userId, Long eventId) {
         User user = userRepository.findById(userId)
                 .orElseThrow(() -> new ResourceNotFoundException("User not found with ID: " + userId));
-        Event event = eventRepository.findByIdAndDeletedAtIsNull(eventId)
+        Event event = eventRepository.findByIdForUpdate(eventId)
                 .orElseThrow(() -> new ResourceNotFoundException("Event not found with ID: " + eventId));
 
         validateEventCanAcceptWaitlist(event);
@@ -95,13 +95,14 @@ public class WaitlistService {
     }
 
     private void validateEventCanAcceptWaitlist(Event event) {
-        if (event.getStatus() != EventStatus.OPEN) {
+        if (event.getDeletedAt() != null || event.getStatus() != EventStatus.OPEN) {
             throw new BusinessRuleException("Cannot join the waitlist for a closed event.");
         }
         if (!LocalDateTime.now().isBefore(event.getStartTime())) {
             throw new BusinessRuleException("Cannot join the waitlist after the event has started.");
         }
-        if (event.getRegisteredCount() < event.getCapacity()) {
+        int heldCount = event.getHeldCount() == null ? 0 : event.getHeldCount();
+        if (event.getRegisteredCount() + heldCount < event.getCapacity()) {
             throw new BusinessRuleException("The event still has available capacity.");
         }
     }

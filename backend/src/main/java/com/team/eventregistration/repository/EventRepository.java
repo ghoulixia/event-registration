@@ -42,7 +42,7 @@ public interface EventRepository extends JpaRepository<Event, Long> {
          + "SET e.registeredCount = e.registeredCount + 1 "
          + "WHERE e.id = :eventId "
          + "AND e.status = 'OPEN' "
-         + "AND e.registeredCount < e.capacity "
+         + "AND e.registeredCount + e.heldCount < e.capacity "
          + "AND e.deletedAt IS NULL")
     int incrementRegisteredCountIfCapacityAvailable(
             @Param("eventId") Long eventId);

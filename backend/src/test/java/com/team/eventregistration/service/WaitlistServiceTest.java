@@ -152,11 +152,54 @@ class WaitlistServiceTest {
         );
     }
 
+    @Test
+    void allowsJoiningWhenAllRemainingCapacityIsHeldByAnOffer() {
+        event.setCapacity(2);
+        event.setRegisteredCount(1);
+        event.setHeldCount(1);
+        event.setStatus(EventStatus.OPEN);
+        event.setStartTime(LocalDateTime.now().plusHours(1));
+        when(userRepository.findById(1L)).thenReturn(Optional.of(firstUser));
+        when(eventRepository.findByIdForUpdate(10L)).thenReturn(Optional.of(event));
+        when(registrationRepository.findByUser_IdAndEvent_Id(1L, 10L))
+                .thenReturn(Optional.empty());
+        when(waitlistEntryRepository.findByUser_IdAndEvent_IdAndStatus(
+                1L, 10L, WaitlistEntryStatus.WAITING)).thenReturn(Optional.empty());
+        when(waitlistEntryRepository.saveAndFlush(any(WaitlistEntry.class)))
+                .thenAnswer(invocation -> invocation.getArgument(0));
+        when(waitlistEntryRepository.findByEvent_IdAndStatusOrderByJoinedAtAscIdAsc(
+                10L, WaitlistEntryStatus.WAITING)).thenReturn(List.of());
+
+        WaitlistEntryResponse response = waitlistService.joinWaitlist(1L, 10L);
+
+        assertEquals(WaitlistEntryStatus.WAITING, response.getStatus());
+    }
+
+    @Test
+    void rejectsJoiningADeletedEvent() {
+        event.setStatus(EventStatus.OPEN);
+        event.setDeletedAt(LocalDateTime.now().minusMinutes(1));
+        event.setStartTime(LocalDateTime.now().plusHours(1));
+        event.setCapacity(1);
+        event.setRegisteredCount(1);
+        event.setHeldCount(0);
+        when(userRepository.findById(1L)).thenReturn(Optional.of(firstUser));
+        when(eventRepository.findByIdForUpdate(10L)).thenReturn(Optional.of(event));
+
+        assertThrows(
+                com.team.eventregistration.exception.BusinessRuleException.class,
+                () -> waitlistService.joinWaitlist(1L, 10L)
+        );
+
+        verify(waitlistEntryRepository, never()).saveAndFlush(any(WaitlistEntry.class));
+    }
+
     private void prepareFullEventForJoin() {
         event.setStatus(EventStatus.OPEN);
         event.setStartTime(LocalDateTime.now().plusDays(1));
         event.setCapacity(1);
         event.setRegisteredCount(1);
+        when(eventRepository.findByIdForUpdate(10L)).thenReturn(Optional.of(event));
         when(userRepository.findById(1L)).thenReturn(Optional.of(firstUser));
         when(eventRepository.findByIdAndDeletedAtIsNull(10L)).thenReturn(Optional.of(event));
         when(registrationRepository.findByUser_IdAndEvent_Id(1L, 10L))

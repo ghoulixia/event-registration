@@ -1,6 +1,7 @@
 package com.team.eventregistration.service;
 
 import com.team.eventregistration.entity.*;
+import com.team.eventregistration.exception.EventFullException;
 import com.team.eventregistration.repository.EventRepository;
 import com.team.eventregistration.repository.RegistrationRepository;
 import com.team.eventregistration.repository.SlotOfferRepository;
@@ -26,6 +27,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 @SpringBootTest
 class SlotOfferServiceIntegrationTest {
     @Autowired private SlotOfferService slotOfferService;
+    @Autowired private RegistrationService registrationService;
     @Autowired private EventRepository eventRepository;
     @Autowired private UserRepository userRepository;
     @Autowired private WaitlistEntryRepository waitlistEntryRepository;
@@ -115,6 +117,23 @@ class SlotOfferServiceIntegrationTest {
                         secondUser.getId(), event.getId(), SlotOfferStatus.PENDING)
                 .orElseThrow();
         assertEquals(secondUser.getId(), secondOffer.getUser().getId());
+    }
+
+    @Test
+    void directRegistrationCannotBypassWaitingEntryWithAvailableCapacity() {
+        User waitingUser = saveUser("priority-waiting");
+        User directUser = saveUser("priority-direct");
+        Event event = saveEvent(LocalDateTime.now().plusHours(2), 1);
+        saveEntry(waitingUser, event);
+
+        assertThrows(EventFullException.class,
+                () -> registrationService.registerForEvent(directUser.getId(), event.getId()));
+        entityManager.clear();
+
+        assertEquals(WaitlistEntryStatus.OFFERED,
+                waitlistEntryRepository.findByEvent_Id(event.getId()).get(0).getStatus());
+        assertEquals(1, eventRepository.findById(event.getId()).orElseThrow().getHeldCount());
+        assertEquals(0, registrationRepository.findByEvent_Id(event.getId()).size());
     }
 
     @Test

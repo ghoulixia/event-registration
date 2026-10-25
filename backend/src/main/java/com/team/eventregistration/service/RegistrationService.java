@@ -40,7 +40,7 @@ public class RegistrationService {
         this.slotOfferService = slotOfferService;
     }
 
-    @Transactional
+    @Transactional(noRollbackFor = EventFullException.class)
     public RegistrationResponse registerForEvent(Long userId, Long eventId) {
         // 1. Validate user and event existence
         User user = userRepository.findById(userId)
@@ -68,8 +68,12 @@ public class RegistrationService {
             if (existingRegistration.getStatus() == RegistrationStatus.CONFIRMED) {
                 throw new DuplicateRegistrationException("User has already registered for this event.");
             }
+        }
 
-            // Atomically reserve a slot before re-registering
+        slotOfferService.allocateAvailableSlotsToWaitlist(eventId);
+
+        if (existingRegistration != null) {
+            // Atomically reserve a slot before re-registering.
             int updatedRows = eventRepository.incrementRegisteredCountIfCapacityAvailable(eventId);
             if (updatedRows == 0) {
                 throw new EventFullException("Event is full. Cannot register.");
@@ -174,7 +178,7 @@ public class RegistrationService {
                     "Event registration count could not be updated consistently.");
         }
 
-        slotOfferService.offerNextWaitingEntry(eventId);
+        slotOfferService.allocateAvailableSlotsToWaitlist(eventId);
     }
 
     private boolean isDuplicateRegistration(DataIntegrityViolationException ex) {
