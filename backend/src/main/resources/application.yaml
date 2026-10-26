@@ -5,6 +5,7 @@ spring:
     password: ${DB_PASSWORD:event123}
 
   jpa:
+    open-in-view: false
     hibernate:
       ddl-auto: validate
 

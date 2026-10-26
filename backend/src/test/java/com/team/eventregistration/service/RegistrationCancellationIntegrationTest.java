@@ -1,5 +1,7 @@
 package com.team.eventregistration.service;
 
+import com.team.eventregistration.PostgresTestSupport;
+
 import com.team.eventregistration.entity.Category;
 import com.team.eventregistration.entity.City;
 import com.team.eventregistration.entity.Event;
@@ -37,7 +39,7 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 @SpringBootTest
-class RegistrationCancellationIntegrationTest {
+class RegistrationCancellationIntegrationTest extends PostgresTestSupport {
     @Autowired private RegistrationService registrationService;
     @Autowired private RegistrationRepository registrationRepository;
     @Autowired private SlotOfferRepository slotOfferRepository;

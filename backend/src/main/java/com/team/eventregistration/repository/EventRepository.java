@@ -12,9 +12,6 @@ import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
 import jakarta.persistence.LockModeType;
-
-import java.time.LocalDateTime;
-import java.util.List;
 import java.util.Optional;
 
 public interface EventRepository extends JpaRepository<Event, Long> {
@@ -37,6 +34,8 @@ public interface EventRepository extends JpaRepository<Event, Long> {
 
     long countByDeletedAtIsNull();
 
+    Page<Event> findByOrganizerUserIdOrderByCreatedAtDescIdDesc(Long ownerId, Pageable pageable);
+
     @Modifying
     @Query("UPDATE Event e "
          + "SET e.registeredCount = e.registeredCount + 1 "
@@ -48,22 +47,7 @@ public interface EventRepository extends JpaRepository<Event, Long> {
             @Param("eventId") Long eventId);
 
     @Modifying
-    @Query("UPDATE Event e "
-         + "SET e.registeredCount = e.registeredCount - 1 "
-         + "WHERE e.id = :eventId "
-         + "AND e.status = 'OPEN' "
-         + "AND e.registeredCount > 0 "
-         + "AND e.deletedAt IS NULL")
+    @Query("UPDATE Event e SET e.registeredCount = e.registeredCount - 1 "
+         + "WHERE e.id = :eventId AND e.registeredCount > 0")
     int decrementRegisteredCount(@Param("eventId") Long eventId);
-
-    List<Event> findByStartTimeLessThanEqualAndDeletedAtIsNull(
-            LocalDateTime now
-    );
-
-    List<Event> findByStartTimeLessThanEqual(LocalDateTime now);
-
-    @Query("SELECT DISTINCT e FROM Event e JOIN WaitlistEntry w ON w.event.id = e.id "
-         + "WHERE (e.status <> 'OPEN' OR e.deletedAt IS NOT NULL) "
-         + "AND w.status IN ('WAITING', 'OFFERED')")
-    List<Event> findInactiveWithActiveWaitlistEntries();
 }
