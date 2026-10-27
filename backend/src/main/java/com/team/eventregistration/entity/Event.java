@@ -33,10 +33,10 @@ public class Event {
     private Long organizerUserId;
 
     @Column(name = "held_count", nullable = false)
-    private int heldCount;
+    private Integer heldCount = 0;
 
     @Column(name = "offer_ttl_minutes", nullable = false)
-    private int offerTtlMinutes = 10;
+    private Integer offerTtlMinutes = 10;
 
     @Enumerated(EnumType.STRING)
     @Column(nullable = false, length = 20)
@@ -74,12 +74,6 @@ public class Event {
     @Column(name = "updated_at", nullable = false)
     private LocalDateTime updatedAt;
 
-    @Column(name = "held_count", nullable = false)
-    private Integer heldCount = 0;
-
-    @Column(name = "offer_ttl_minutes", nullable = false)
-    private Integer offerTtlMinutes = 10;
-
     @PrePersist
     protected void onCreate() {
         LocalDateTime now = LocalDateTime.now();
@@ -107,10 +101,12 @@ public class Event {
 
     public Long getOrganizerUserId() { return organizerUserId; }
     public void setOrganizerUserId(Long organizerUserId) { this.organizerUserId = organizerUserId; }
-    public int getHeldCount() { return heldCount; }
-    public void setHeldCount(int heldCount) { this.heldCount = heldCount; }
-    public int getOfferTtlMinutes() { return offerTtlMinutes; }
-    public void setOfferTtlMinutes(int offerTtlMinutes) { this.offerTtlMinutes = offerTtlMinutes; }
+
+    public Integer getHeldCount() { return heldCount; }
+    public void setHeldCount(Integer heldCount) { this.heldCount = heldCount; }
+
+    public Integer getOfferTtlMinutes() { return offerTtlMinutes; }
+    public void setOfferTtlMinutes(Integer offerTtlMinutes) { this.offerTtlMinutes = offerTtlMinutes; }
 
     public City getCity() { return city; }
     public void setCity(City city) { this.city = city; }
@@ -129,12 +125,6 @@ public class Event {
 
     public Integer getRegisteredCount() { return registeredCount; }
     public void setRegisteredCount(Integer registeredCount) { this.registeredCount = registeredCount; }
-
-    public Integer getHeldCount() { return heldCount; }
-    public void setHeldCount(Integer heldCount) { this.heldCount = heldCount; }
-
-    public Integer getOfferTtlMinutes() { return offerTtlMinutes; }
-    public void setOfferTtlMinutes(Integer offerTtlMinutes) { this.offerTtlMinutes = offerTtlMinutes; }
 
     public EventStatus getStatus() { return status; }
     public void setStatus(EventStatus status) { this.status = status; }

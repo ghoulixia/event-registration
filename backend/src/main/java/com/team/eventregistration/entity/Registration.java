@@ -84,7 +84,8 @@ public class Registration {
     }
 
     public void remove(LocalDateTime now, Long actorId, String reason) {
-        if (status != RegistrationStatus.CONFIRMED) throw new IllegalStateException("Registration is not confirmed.");
+        if (status != RegistrationStatus.CONFIRMED)
+            throw new IllegalStateException("Registration is not confirmed.");
         status = RegistrationStatus.REMOVED;
         removedAt = now;
         removedByUserId = actorId;
