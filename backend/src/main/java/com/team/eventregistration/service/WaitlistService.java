@@ -1,20 +1,21 @@
 package com.team.eventregistration.service;
 
+import com.team.eventregistration.dto.MyWaitlistResponse;
+import com.team.eventregistration.dto.SlotOfferResponse;
 import com.team.eventregistration.dto.WaitlistEntryResponse;
 import com.team.eventregistration.entity.*;
 import com.team.eventregistration.exception.BusinessRuleException;
 import com.team.eventregistration.exception.DuplicateWaitlistEntryException;
 import com.team.eventregistration.exception.ResourceNotFoundException;
-import com.team.eventregistration.repository.EventRepository;
-import com.team.eventregistration.repository.RegistrationRepository;
-import com.team.eventregistration.repository.UserRepository;
-import com.team.eventregistration.repository.WaitlistEntryRepository;
+import com.team.eventregistration.repository.*;
 import org.hibernate.exception.ConstraintViolationException;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.Instant;
 import java.time.LocalDateTime;
+import java.time.ZoneOffset;
 import java.util.List;
 
 @Service
@@ -23,17 +24,20 @@ public class WaitlistService {
     private final EventRepository eventRepository;
     private final UserRepository userRepository;
     private final RegistrationRepository registrationRepository;
+    private final SlotOfferRepository slotOfferRepository;
 
     public WaitlistService(
             WaitlistEntryRepository waitlistEntryRepository,
             EventRepository eventRepository,
             UserRepository userRepository,
-            RegistrationRepository registrationRepository
+            RegistrationRepository registrationRepository,
+            SlotOfferRepository slotOfferRepository
     ) {
         this.waitlistEntryRepository = waitlistEntryRepository;
         this.eventRepository = eventRepository;
         this.userRepository = userRepository;
         this.registrationRepository = registrationRepository;
+        this.slotOfferRepository = slotOfferRepository;
     }
 
     @Transactional
@@ -87,11 +91,51 @@ public class WaitlistService {
     }
 
     @Transactional(readOnly = true)
-    public List<WaitlistEntryResponse> getMyWaitlist(Long userId) {
+    public MyWaitlistResponse getMyWaitlist(Long userId) {
         userRepository.findById(userId)
                 .orElseThrow(() -> new ResourceNotFoundException("User not found with ID: " + userId));
-        return mapEntries(waitlistEntryRepository
-                .findByUser_IdAndStatusOrderByJoinedAtAscIdAsc(userId, WaitlistEntryStatus.WAITING));
+
+        // 1. Query the user's active waitlist entries (WAITING or OFFERED)
+        List<WaitlistEntry> activeEntries = waitlistEntryRepository
+                .findByUser_IdAndStatusInOrderByJoinedAtAscIdAsc(
+                        userId,
+                        List.of(WaitlistEntryStatus.WAITING, WaitlistEntryStatus.OFFERED)
+                );
+
+        // 2. Map the active entries to WaitlistEntryResponse
+        List<WaitlistEntryResponse> entryResponses = activeEntries.stream().map(entry -> {
+            Integer position = null;
+
+            // If the entry is in WAITING status, calculate its position in the waitlist
+            if (entry.getStatus() == WaitlistEntryStatus.WAITING) {
+                List<WaitlistEntry> eventWaitingList = waitlistEntryRepository
+                        .findByEvent_IdAndStatusOrderByJoinedAtAscIdAsc(
+                                entry.getEvent().getId(),
+                                WaitlistEntryStatus.WAITING
+                        );
+                int index = eventWaitingList.indexOf(entry);
+                position = (index >= 0) ? index + 1 : null;
+            }
+
+            // If the entry is in OFFERED status, find the corresponding PENDING offer
+            SlotOfferResponse offerResponse = null;
+            if (entry.getStatus() == WaitlistEntryStatus.OFFERED) {
+                offerResponse = slotOfferRepository
+                        .findByWaitlistEntry_IdAndStatus(entry.getId(), SlotOfferStatus.PENDING)
+                        .map(offer -> new SlotOfferResponse(
+                                offer.getId(),
+                                offer.getStatus(),
+                                offer.getExpiresAt() != null
+                                        ? offer.getExpiresAt().atZone(ZoneOffset.UTC).toInstant()
+                                        : null
+                        ))
+                .orElse(null);
+            }
+            return mapToMyWaitlistEntryResponse(entry, position, offerResponse);
+        }).toList();
+
+        // 3. Return MyWaitlistResponse containing the list of WaitlistEntryResponse
+        return new MyWaitlistResponse(entryResponses, Instant.now());
     }
 
     private void validateEventCanAcceptWaitlist(Event event) {
@@ -135,6 +179,21 @@ public class WaitlistService {
         response.setStatus(entry.getStatus());
         response.setJoinedAt(entry.getJoinedAt());
         response.setPosition(position);
+        return response;
+    }
+
+    private WaitlistEntryResponse mapToMyWaitlistEntryResponse(
+            WaitlistEntry entry, Integer position, SlotOfferResponse offer
+    ) {
+        WaitlistEntryResponse response = new WaitlistEntryResponse();
+        response.setId(entry.getId());
+        response.setEventId(entry.getEvent().getId());
+        response.setEventTitle(entry.getEvent().getTitle());
+        response.setUserId(entry.getUser().getId());
+        response.setStatus(entry.getStatus());
+        response.setJoinedAt(entry.getJoinedAt());
+        response.setPosition(position);
+        response.setOffer(offer);
         return response;
     }
 }

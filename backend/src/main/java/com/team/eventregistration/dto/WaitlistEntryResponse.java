@@ -12,6 +12,7 @@ public class WaitlistEntryResponse {
     private WaitlistEntryStatus status;
     private LocalDateTime joinedAt;
     private Integer position;
+    private SlotOfferResponse offer;
 
     public Long getId() { return id; }
     public void setId(Long id) { this.id = id; }
@@ -27,4 +28,6 @@ public class WaitlistEntryResponse {
     public void setJoinedAt(LocalDateTime joinedAt) { this.joinedAt = joinedAt; }
     public Integer getPosition() { return position; }
     public void setPosition(Integer position) { this.position = position; }
+    public SlotOfferResponse getOffer() { return offer; }
+    public void setOffer(SlotOfferResponse offer) { this.offer = offer; }
 }

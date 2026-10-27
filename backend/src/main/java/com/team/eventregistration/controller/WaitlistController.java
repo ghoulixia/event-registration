@@ -1,5 +1,6 @@
 package com.team.eventregistration.controller;
 
+import com.team.eventregistration.dto.MyWaitlistResponse;
 import com.team.eventregistration.dto.WaitlistEntryResponse;
 import com.team.eventregistration.service.WaitlistService;
 import io.swagger.v3.oas.annotations.Operation;
@@ -37,15 +38,9 @@ public class WaitlistController {
         return ResponseEntity.noContent().build();
     }
 
-    @GetMapping("/events/{id}/waitlist")
-    @Operation(summary = "View an event waitlist in FIFO order")
-    public ResponseEntity<List<WaitlistEntryResponse>> getEventWaitlist(@PathVariable Long id) {
-        return ResponseEntity.ok(waitlistService.getEventWaitlist(id));
-    }
-
     @GetMapping("/me/waitlist")
     @Operation(summary = "View my active waitlist entries")
-    public ResponseEntity<List<WaitlistEntryResponse>> getMyWaitlist(
+    public ResponseEntity<MyWaitlistResponse> getMyWaitlist(
             @AuthenticationPrincipal Long userId) {
         return ResponseEntity.ok(waitlistService.getMyWaitlist(userId));
     }

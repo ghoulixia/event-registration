@@ -1,21 +1,23 @@
 package com.team.eventregistration.service;
 
+import com.team.eventregistration.dto.MyWaitlistResponse;
+import com.team.eventregistration.dto.SlotOfferResponse;
 import com.team.eventregistration.dto.WaitlistEntryResponse;
 import com.team.eventregistration.entity.*;
-import com.team.eventregistration.repository.EventRepository;
-import com.team.eventregistration.repository.RegistrationRepository;
-import com.team.eventregistration.repository.UserRepository;
-import com.team.eventregistration.repository.WaitlistEntryRepository;
+import com.team.eventregistration.repository.*;
 import org.hibernate.exception.ConstraintViolationException;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.dao.DataIntegrityViolationException;
 
 import java.time.LocalDateTime;
+import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.Mockito.*;
 
@@ -23,6 +25,7 @@ class WaitlistServiceTest {
     private WaitlistEntryRepository waitlistEntryRepository;
     private EventRepository eventRepository;
     private UserRepository userRepository;
+    private SlotOfferRepository slotOfferRepository;
     private RegistrationRepository registrationRepository;
     private WaitlistService waitlistService;
     private Event event;
@@ -36,8 +39,14 @@ class WaitlistServiceTest {
         eventRepository = mock(EventRepository.class);
         userRepository = mock(UserRepository.class);
         registrationRepository = mock(RegistrationRepository.class);
+        slotOfferRepository = mock(SlotOfferRepository.class);
         waitlistService = new WaitlistService(
-                waitlistEntryRepository, eventRepository, userRepository, registrationRepository);
+                waitlistEntryRepository,
+                eventRepository,
+                userRepository,
+                registrationRepository,
+                slotOfferRepository
+        );
 
         event = new Event();
         event.setId(10L);
@@ -192,6 +201,53 @@ class WaitlistServiceTest {
         );
 
         verify(waitlistEntryRepository, never()).saveAndFlush(any(WaitlistEntry.class));
+    }
+
+    @Test
+    void returnsMyActiveEntriesWithWaitingPositionAndPendingOffer() {
+        LocalDateTime waitingJoinedAt = LocalDateTime.of(2026, 1, 1, 10, 0);
+        LocalDateTime offeredJoinedAt = waitingJoinedAt.plusMinutes(1);
+        WaitlistEntry waiting = entry(20L, firstUser, waitingJoinedAt);
+        WaitlistEntry waitingAhead = entry(19L, secondUser, waitingJoinedAt.minusMinutes(1));
+        WaitlistEntry offered = entry(21L, firstUser, offeredJoinedAt);
+        offered.offer();
+
+        SlotOffer pendingOffer = mock(SlotOffer.class);
+        LocalDateTime expiresAt = LocalDateTime.of(2026, 1, 1, 10, 10);
+        when(pendingOffer.getId()).thenReturn(30L);
+        when(pendingOffer.getStatus()).thenReturn(SlotOfferStatus.PENDING);
+        when(pendingOffer.getExpiresAt()).thenReturn(expiresAt);
+
+        when(userRepository.findById(1L)).thenReturn(Optional.of(firstUser));
+        when(waitlistEntryRepository.findByUser_IdAndStatusInOrderByJoinedAtAscIdAsc(
+                1L, List.of(WaitlistEntryStatus.WAITING, WaitlistEntryStatus.OFFERED)))
+                .thenReturn(List.of(waiting, offered));
+        when(waitlistEntryRepository.findByEvent_IdAndStatusOrderByJoinedAtAscIdAsc(
+                10L, WaitlistEntryStatus.WAITING))
+                .thenReturn(List.of(waitingAhead, waiting));
+        when(slotOfferRepository.findByWaitlistEntry_IdAndStatus(
+                21L, SlotOfferStatus.PENDING))
+                .thenReturn(Optional.of(pendingOffer));
+
+        MyWaitlistResponse result = waitlistService.getMyWaitlist(1L);
+
+        assertEquals(2, result.getEntries().size());
+
+        WaitlistEntryResponse waitingResponse = result.getEntries().get(0);
+        assertEquals(20L, waitingResponse.getId());
+        assertEquals(WaitlistEntryStatus.WAITING, waitingResponse.getStatus());
+        assertEquals(2, waitingResponse.getPosition());
+        assertNull(waitingResponse.getOffer());
+
+        WaitlistEntryResponse offeredResponse = result.getEntries().get(1);
+        assertEquals(21L, offeredResponse.getId());
+        assertEquals(WaitlistEntryStatus.OFFERED, offeredResponse.getStatus());
+        assertNull(offeredResponse.getPosition());
+        SlotOfferResponse offerResponse = offeredResponse.getOffer();
+        assertEquals(30L, offerResponse.getId());
+        assertEquals(SlotOfferStatus.PENDING, offerResponse.getStatus());
+        assertEquals(expiresAt.toInstant(ZoneOffset.UTC), offerResponse.getExpiresAt());
+        assertNotNull(result.getServerNow());
     }
 
     private void prepareFullEventForJoin() {
