@@ -113,8 +113,8 @@ class RegistrationCancellationIntegrationTest extends PostgresTestSupport {
         ExecutorService executor = Executors.newFixedThreadPool(2);
         try {
             List<java.util.concurrent.Future<Void>> results = executor.invokeAll(List.of(
-                    () -> cancelAndReturnNull(),
-                    () -> cancelAndReturnNull()));
+                    this::cancelAndReturnNull,
+                    this::cancelAndReturnNull));
 
             for (java.util.concurrent.Future<Void> result : results) {
                 try {

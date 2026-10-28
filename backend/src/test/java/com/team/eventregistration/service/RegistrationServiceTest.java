@@ -10,7 +10,6 @@ import com.team.eventregistration.repository.EventRepository;
 import com.team.eventregistration.repository.RegistrationRepository;
 import com.team.eventregistration.repository.UserRepository;
 import com.team.eventregistration.service.port.EventOfferLifecycle;
-import jakarta.persistence.EntityManager;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
@@ -18,7 +17,6 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
-import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.dao.DataIntegrityViolationException;
 
 import java.time.Clock;

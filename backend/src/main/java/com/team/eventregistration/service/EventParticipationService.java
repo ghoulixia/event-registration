@@ -18,7 +18,6 @@ import org.springframework.transaction.annotation.Transactional;
 import java.time.LocalDateTime;
 import java.util.Comparator;
 import java.util.List;
-import java.util.Map;
 import java.util.Optional;
 
 @Service
@@ -26,16 +25,13 @@ import java.util.Optional;
 public class EventParticipationService implements EventParticipation {
     private final RegistrationRepository registrations;
     private final EventOfferLifecycle offers;
-    private final AuditLogService auditLogService;
 
     public EventParticipationService(
             RegistrationRepository registrations,
-            EventOfferLifecycle offers,
-            AuditLogService auditLogService
+            EventOfferLifecycle offers
     ) {
         this.registrations = registrations;
         this.offers = offers;
-        this.auditLogService = auditLogService;
     }
 
     public void afterCapacityIncrease(Event event, LocalDateTime now) {
