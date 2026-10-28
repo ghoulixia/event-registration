@@ -14,11 +14,7 @@ import com.team.eventregistration.entity.User;
 import com.team.eventregistration.entity.WaitlistEntry;
 import com.team.eventregistration.entity.WaitlistEntryStatus;
 import com.team.eventregistration.exception.BusinessRuleException;
-import com.team.eventregistration.repository.EventRepository;
-import com.team.eventregistration.repository.RegistrationRepository;
-import com.team.eventregistration.repository.SlotOfferRepository;
-import com.team.eventregistration.repository.UserRepository;
-import com.team.eventregistration.repository.WaitlistEntryRepository;
+import com.team.eventregistration.repository.*;
 import jakarta.persistence.EntityManager;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -46,7 +42,9 @@ class RegistrationCancellationIntegrationTest extends PostgresTestSupport {
     @Autowired private EventRepository eventRepository;
     @Autowired private UserRepository userRepository;
     @Autowired private WaitlistEntryRepository waitlistEntryRepository;
+    @Autowired private AuditLogRepository auditLogRepository;
     @Autowired private EntityManager entityManager;
+
 
     private User user;
     private Event event;
@@ -78,6 +76,9 @@ class RegistrationCancellationIntegrationTest extends PostgresTestSupport {
 
     @AfterEach
     void tearDown() {
+        if (user != null && user.getId() != null) {
+            auditLogRepository.deleteByActorUserId(user.getId());
+        }
         if (registration != null && registration.getId() != null) {
             registrationRepository.deleteById(registration.getId());
         }

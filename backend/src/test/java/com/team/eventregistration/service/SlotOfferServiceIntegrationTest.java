@@ -2,11 +2,7 @@ package com.team.eventregistration.service;
 
 import com.team.eventregistration.entity.*;
 import com.team.eventregistration.exception.EventFullException;
-import com.team.eventregistration.repository.EventRepository;
-import com.team.eventregistration.repository.RegistrationRepository;
-import com.team.eventregistration.repository.SlotOfferRepository;
-import com.team.eventregistration.repository.UserRepository;
-import com.team.eventregistration.repository.WaitlistEntryRepository;
+import com.team.eventregistration.repository.*;
 import jakarta.persistence.EntityManager;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
@@ -33,6 +29,7 @@ class SlotOfferServiceIntegrationTest {
     @Autowired private WaitlistEntryRepository waitlistEntryRepository;
     @Autowired private SlotOfferRepository slotOfferRepository;
     @Autowired private RegistrationRepository registrationRepository;
+    @Autowired private AuditLogRepository auditLogRepository;
     @Autowired private EntityManager entityManager;
 
     private final List<Long> createdUserIds = new ArrayList<>();
@@ -49,6 +46,7 @@ class SlotOfferServiceIntegrationTest {
             eventRepository.deleteById(eventId);
         }
         for (Long userId : createdUserIds) {
+            auditLogRepository.deleteByActorUserId(userId);
             userRepository.deleteById(userId);
         }
         createdEventIds.clear();
@@ -134,6 +132,73 @@ class SlotOfferServiceIntegrationTest {
                 waitlistEntryRepository.findByEvent_Id(event.getId()).get(0).getStatus());
         assertEquals(1, eventRepository.findById(event.getId()).orElseThrow().getHeldCount());
         assertEquals(0, registrationRepository.findByEvent_Id(event.getId()).size());
+    }
+
+    @Test
+    void concurrentDirectRegistrationsPreserveTheFinalSlotInvariant() throws Exception {
+        User firstUser = saveUser("final-slot-first");
+        User secondUser = saveUser("final-slot-second");
+        Event event = saveEvent(LocalDateTime.now().plusHours(2), 1);
+
+        ExecutorService executor = Executors.newFixedThreadPool(2);
+        try {
+            List<Future<Boolean>> results = executor.invokeAll(List.of(
+                    () -> tryRegister(firstUser, event),
+                    () -> tryRegister(secondUser, event)));
+
+            long successfulRegistrations = results.stream().filter(this::successful).count();
+            entityManager.clear();
+            Event savedEvent = eventRepository.findById(event.getId()).orElseThrow();
+
+            assertEquals(1, successfulRegistrations);
+            assertEquals(1, savedEvent.getRegisteredCount());
+            assertEquals(0, savedEvent.getHeldCount());
+            assertEquals(1, savedEvent.getRegisteredCount() + savedEvent.getHeldCount());
+        } finally {
+            executor.shutdownNow();
+        }
+    }
+
+    @Test
+    void temporaryCloseRevokesOfferAndRestoresEntryToWaiting() {
+        User offeredUser = saveUser("close-offered");
+        User waitingUser = saveUser("close-waiting");
+        Event event = saveEvent(LocalDateTime.now().plusHours(2), 1);
+        WaitlistEntry offeredEntry = saveEntry(offeredUser, event);
+        WaitlistEntry waitingEntry = saveEntry(waitingUser, event);
+
+        SlotOffer offer = slotOfferService.offerNextWaitingEntry(event.getId()).orElseThrow();
+        slotOfferService.close(event, LocalDateTime.now());
+        entityManager.clear();
+
+        assertEquals(SlotOfferStatus.REVOKED,
+                slotOfferRepository.findById(offer.getId()).orElseThrow().getStatus());
+        assertEquals(WaitlistEntryStatus.WAITING,
+                waitlistEntryRepository.findById(offeredEntry.getId()).orElseThrow().getStatus());
+        assertEquals(WaitlistEntryStatus.WAITING,
+                waitlistEntryRepository.findById(waitingEntry.getId()).orElseThrow().getStatus());
+        assertEquals(0, eventRepository.findById(event.getId()).orElseThrow().getHeldCount());
+    }
+
+    @Test
+    void softDeleteCancelsOfferedAndWaitingEntries() {
+        User offeredUser = saveUser("delete-offered");
+        User waitingUser = saveUser("delete-waiting");
+        Event event = saveEvent(LocalDateTime.now().plusHours(2), 1);
+        WaitlistEntry offeredEntry = saveEntry(offeredUser, event);
+        WaitlistEntry waitingEntry = saveEntry(waitingUser, event);
+
+        SlotOffer offer = slotOfferService.offerNextWaitingEntry(event.getId()).orElseThrow();
+        slotOfferService.delete(event, LocalDateTime.now());
+        entityManager.clear();
+
+        assertEquals(SlotOfferStatus.REVOKED,
+                slotOfferRepository.findById(offer.getId()).orElseThrow().getStatus());
+        assertEquals(WaitlistEntryStatus.CANCELLED,
+                waitlistEntryRepository.findById(offeredEntry.getId()).orElseThrow().getStatus());
+        assertEquals(WaitlistEntryStatus.CANCELLED,
+                waitlistEntryRepository.findById(waitingEntry.getId()).orElseThrow().getStatus());
+        assertEquals(0, eventRepository.findById(event.getId()).orElseThrow().getHeldCount());
     }
 
     @Test
@@ -226,6 +291,23 @@ class SlotOfferServiceIntegrationTest {
 
     private WaitlistEntry saveEntry(User user, Event event) {
         return waitlistEntryRepository.saveAndFlush(new WaitlistEntry(user, event));
+    }
+
+    private boolean tryRegister(User user, Event event) {
+        try {
+            registrationService.registerForEvent(user.getId(), event.getId());
+            return true;
+        } catch (RuntimeException exception) {
+            return false;
+        }
+    }
+
+    private boolean successful(Future<Boolean> result) {
+        try {
+            return result.get();
+        } catch (Exception exception) {
+            throw new IllegalStateException("Concurrent registration task failed.", exception);
+        }
     }
 
     private void await(CountDownLatch latch) {

@@ -245,10 +245,11 @@ class EventOwnershipIntegrationTest extends PostgresTestSupport {
     }
 
     @Test
-    void ownerMayRegisterForTheirOwnEvent() {
+    void ownerCannotRegisterForTheirOwnEvent() throws Exception {
         EventResponse event = event(1);
-        assertEquals(RegistrationStatus.CONFIRMED, register(owner, event).getStatus());
-        assertConfirmedCount(event.getId(), 1);
+        mvc.perform(post(path(event) + "/registrations").header("Authorization", token(owner)))
+                .andExpect(status().isConflict()); // BusinessRuleException results in 409 Conflict
+        assertConfirmedCount(event.getId(), 0);
     }
 
     @Test

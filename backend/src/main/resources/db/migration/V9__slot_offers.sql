@@ -29,21 +29,17 @@ CREATE TABLE slot_offers (
         CHECK (expires_at > created_at)
 );
 
--- Scheduler tìm các offer đã đến hạn.
 CREATE INDEX idx_slot_offers_pending_expiry
     ON slot_offers (expires_at)
     WHERE status = 'PENDING';
 
--- Mỗi waitlist entry chỉ có tối đa một offer PENDING.
 CREATE UNIQUE INDEX uk_slot_offers_pending_entry
     ON slot_offers (waitlist_entry_id)
     WHERE status = 'PENDING';
 
--- Mỗi user chỉ có tối đa một offer PENDING cho một event.
 CREATE UNIQUE INDEX uk_slot_offers_pending_user_event
     ON slot_offers (user_id, event_id)
     WHERE status = 'PENDING';
 
--- Hỗ trợ truy vấn lịch sử offer của một user trong một event.
 CREATE INDEX idx_slot_offers_user_event_created
     ON slot_offers (user_id, event_id, created_at DESC);

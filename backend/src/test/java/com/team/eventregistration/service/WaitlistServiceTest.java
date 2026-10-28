@@ -5,20 +5,20 @@ import com.team.eventregistration.dto.SlotOfferResponse;
 import com.team.eventregistration.dto.WaitlistEntryResponse;
 import com.team.eventregistration.entity.*;
 import com.team.eventregistration.repository.*;
+import com.team.eventregistration.service.port.EventOfferLifecycle;
 import org.hibernate.exception.ConstraintViolationException;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.dao.DataIntegrityViolationException;
 
+import java.time.Clock;
 import java.time.LocalDateTime;
 import java.time.ZoneOffset;
+import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertNotNull;
-import static org.junit.jupiter.api.Assertions.assertNull;
-import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
 
 class WaitlistServiceTest {
@@ -27,7 +27,9 @@ class WaitlistServiceTest {
     private UserRepository userRepository;
     private SlotOfferRepository slotOfferRepository;
     private RegistrationRepository registrationRepository;
+    private EventOfferLifecycle eventOfferLifecycle;
     private WaitlistService waitlistService;
+    private Clock clock;
     private Event event;
     private User firstUser;
     private User secondUser;
@@ -40,12 +42,17 @@ class WaitlistServiceTest {
         userRepository = mock(UserRepository.class);
         registrationRepository = mock(RegistrationRepository.class);
         slotOfferRepository = mock(SlotOfferRepository.class);
+        eventOfferLifecycle = mock(EventOfferLifecycle.class);
+        clock = Clock.systemDefaultZone();
+
         waitlistService = new WaitlistService(
                 waitlistEntryRepository,
                 eventRepository,
                 userRepository,
                 registrationRepository,
-                slotOfferRepository
+                slotOfferRepository,
+                eventOfferLifecycle,
+                clock
         );
 
         event = new Event();
@@ -114,8 +121,12 @@ class WaitlistServiceTest {
         WaitlistEntry first = entry(20L, firstUser, joinedAt);
         WaitlistEntry second = entry(21L, secondUser, joinedAt.plusMinutes(1));
         WaitlistEntry third = entry(22L, thirdUser, joinedAt.plusMinutes(2));
-        when(waitlistEntryRepository.findByUser_IdAndEvent_IdAndStatus(
-                1L, 10L, WaitlistEntryStatus.WAITING)).thenReturn(Optional.of(first));
+        when(waitlistEntryRepository.findByUser_IdAndEvent_IdAndStatusIn(
+                1L,
+                10L,
+                List.of(WaitlistEntryStatus.WAITING, WaitlistEntryStatus.OFFERED)))
+                .thenReturn(Optional.of(first));
+        when(eventRepository.findByIdForUpdate(10L)).thenReturn(Optional.of(event));
         when(eventRepository.findByIdAndDeletedAtIsNull(10L)).thenReturn(Optional.of(event));
         when(waitlistEntryRepository.findByEvent_IdAndStatusOrderByJoinedAtAscIdAsc(
                 10L, WaitlistEntryStatus.WAITING)).thenReturn(List.of(second, third));

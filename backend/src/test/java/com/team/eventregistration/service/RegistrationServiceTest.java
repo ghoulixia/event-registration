@@ -9,17 +9,22 @@ import com.team.eventregistration.exception.ResourceNotFoundException;
 import com.team.eventregistration.repository.EventRepository;
 import com.team.eventregistration.repository.RegistrationRepository;
 import com.team.eventregistration.repository.UserRepository;
+import com.team.eventregistration.service.port.EventOfferLifecycle;
+import jakarta.persistence.EntityManager;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
-import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.dao.DataIntegrityViolationException;
 
+import java.time.Clock;
+import java.time.Instant;
 import java.time.LocalDateTime;
+import java.time.ZoneId;
 import java.util.List;
 import java.util.Optional;
 
@@ -29,11 +34,15 @@ import static org.mockito.Mockito.*;
 
 @ExtendWith(MockitoExtension.class)
 class RegistrationServiceTest {
-    @Mock private RegistrationRepository registrationRepository;
+    @Autowired private RegistrationRepository registrationRepository;
+    @Autowired private UserRepository userRepository;
+    @Autowired private EventRepository eventRepository;
+    @Autowired private EventOfferLifecycle eventOfferLifecycle;
+    @Autowired private AuditLogService auditLogService;
+    @Autowired private RegistrationTransactionService registrationTransactionService;
+    @Autowired private EntityManager entityManager;
 
-    @Mock private UserRepository userRepository;
-
-    @Mock private EventRepository eventRepository;
+    private Clock clock;
 
     private RegistrationService registrationService;
 
@@ -42,7 +51,20 @@ class RegistrationServiceTest {
 
     @BeforeEach
     void setUp() {
-        registrationService = new RegistrationService(registrationRepository, eventRepository, userRepository, java.time.Clock.systemDefaultZone());
+        Instant fixedInstant = Instant.parse("2026-10-10T10:00:00Z");
+        ZoneId zoneId = ZoneId.of("Asia/Ho_Chi_Minh");
+        clock = Clock.fixed(fixedInstant, zoneId);
+
+        registrationService = new RegistrationService(
+                registrationRepository,
+                eventRepository,
+                userRepository,
+                eventOfferLifecycle,
+                auditLogService,
+                registrationTransactionService,
+                clock,
+                entityManager
+        );
 
         sampleUser = new User(
                 "reimuhakurei@gensokyo.jp",
@@ -56,8 +78,9 @@ class RegistrationServiceTest {
         sampleEvent.setId(10L);
         sampleEvent.setTitle("Java Workshop");
         sampleEvent.setStatus(EventStatus.OPEN);
-        sampleEvent.setStartTime(LocalDateTime.now().plusDays(7));
-        sampleEvent.setEndTime(LocalDateTime.now().plusDays(7).plusHours(2));
+        sampleEvent.setStartTime(LocalDateTime.now(clock).plusDays(7));
+        sampleEvent.setEndTime(LocalDateTime.now(clock).plusDays(7).plusHours(2));
+        sampleEvent.setCapacity(50);
     }
 
     @Nested
@@ -72,24 +95,23 @@ class RegistrationServiceTest {
         void shouldRegisterSuccessfully() {
             when(userRepository.findById(1L))
                     .thenReturn(Optional.of(sampleUser));
-            when(eventRepository.findByIdForUpdate(10L))
+            when(eventRepository.findById(10L))
                     .thenReturn(Optional.of(sampleEvent));
-            when(registrationRepository.findByUser_IdAndEvent_Id(1L, 10L))
-                    .thenReturn(Optional.empty());
-            when(eventRepository.incrementRegisteredCountIfCapacityAvailable(10L))
-                    .thenReturn(1);
-            when(registrationRepository.saveAndFlush(any(Registration.class)))
-                    .thenAnswer(invocation -> invocation.getArgument(0));
+            RegistrationResponse expected = new RegistrationResponse();
+            expected.setEventId(10L);
+            expected.setEventTitle("Java Workshop");
+            expected.setStatus(RegistrationStatus.CONFIRMED);
+            when(registrationTransactionService.registerForEvent(1L, 10L)).thenReturn(expected);
 
             RegistrationResponse response = registrationService.registerForEvent(1L, 10L);
 
-            assertNotNull(response);
+            assertEquals(expected, response);
             assertEquals(10L, response.getEventId());
             assertEquals("Java Workshop", response.getEventTitle());
             assertEquals(RegistrationStatus.CONFIRMED, response.getStatus());
 
-            verify(eventRepository).incrementRegisteredCountIfCapacityAvailable(10L);
-            verify(registrationRepository).saveAndFlush(any(Registration.class));
+            verify(eventOfferLifecycle).allocateAvailableForRegistration(10L);
+            verify(registrationTransactionService).registerForEvent(1L, 10L);
         }
 
         @Test
@@ -97,19 +119,17 @@ class RegistrationServiceTest {
         void shouldThrowDuplicateRegistrationException() {
             when(userRepository.findById(1L))
                     .thenReturn(Optional.of(sampleUser));
-            when(eventRepository.findByIdForUpdate(10L))
+            when(eventRepository.findById(10L))
                     .thenReturn(Optional.of(sampleEvent));
-
-            Registration existingRegistration = new Registration(sampleUser, sampleEvent);
-            when(registrationRepository.findByUser_IdAndEvent_Id(1L, 10L))
-                    .thenReturn(Optional.of(existingRegistration));
+            when(registrationTransactionService.registerForEvent(1L, 10L))
+                    .thenThrow(new DuplicateRegistrationException("duplicate"));
 
             assertThrows(
                     DuplicateRegistrationException.class,
                     () -> registrationService.registerForEvent(1L, 10L)
             );
 
-            verify(registrationRepository, never()).saveAndFlush(any(Registration.class));
+            verify(eventOfferLifecycle).allocateAvailableForRegistration(10L);
         }
 
         @Test
@@ -117,34 +137,21 @@ class RegistrationServiceTest {
         void shouldAllowReRegistration() {
             when(userRepository.findById(1L))
                     .thenReturn(Optional.of(sampleUser));
-            when(eventRepository.findByIdForUpdate(10L))
+            when(eventRepository.findById(10L))
                     .thenReturn(Optional.of(sampleEvent));
-
-            Registration canceledRegistration = new Registration(sampleUser, sampleEvent);
-            canceledRegistration.cancel();
-
-            assertEquals(RegistrationStatus.CANCELLED, canceledRegistration.getStatus());
-
-            when(registrationRepository.findByUser_IdAndEvent_Id(1L, 10L))
-                    .thenReturn(Optional.of(canceledRegistration));
-            when(eventRepository.incrementRegisteredCountIfCapacityAvailable(10L))
-                    .thenReturn(1);
-            when(registrationRepository.save(canceledRegistration))
-                    .thenAnswer(invocation -> invocation.getArgument(0));
+            RegistrationResponse expected = new RegistrationResponse();
+            expected.setEventId(10L);
+            expected.setEventTitle("Java Workshop");
+            expected.setStatus(RegistrationStatus.CONFIRMED);
+            when(registrationTransactionService.registerForEvent(1L, 10L)).thenReturn(expected);
 
             RegistrationResponse response = registrationService.registerForEvent(1L, 10L);
 
-            assertNotNull(response);
             assertEquals(10L, response.getEventId());
             assertEquals("Java Workshop", response.getEventTitle());
             assertEquals(RegistrationStatus.CONFIRMED, response.getStatus());
-            verify(eventRepository).incrementRegisteredCountIfCapacityAvailable(10L);
-
-            ArgumentCaptor<Registration> captor = ArgumentCaptor.forClass(Registration.class);
-
-            verify(registrationRepository).save(captor.capture());
-
-            assertEquals(RegistrationStatus.CONFIRMED, captor.getValue().getStatus());
+            verify(eventOfferLifecycle).allocateAvailableForRegistration(10L);
+            verify(registrationTransactionService).registerForEvent(1L, 10L);
         }
 
         @Test
@@ -152,13 +159,9 @@ class RegistrationServiceTest {
         void shouldFailWhenSavingRegistrationFails() {
             when(userRepository.findById(1L))
                     .thenReturn(Optional.of(sampleUser));
-            when(eventRepository.findByIdForUpdate(10L))
+            when(eventRepository.findById(10L))
                     .thenReturn(Optional.of(sampleEvent));
-            when(registrationRepository.findByUser_IdAndEvent_Id(1L, 10L))
-                    .thenReturn(Optional.empty());
-            when(eventRepository.incrementRegisteredCountIfCapacityAvailable(10L))
-                    .thenReturn(1);
-            when(registrationRepository.saveAndFlush(any(Registration.class)))
+            when(registrationTransactionService.registerForEvent(1L, 10L))
                     .thenThrow(new DataIntegrityViolationException("Simulated database error"));
 
             assertThrows(
@@ -166,8 +169,7 @@ class RegistrationServiceTest {
                     () -> registrationService.registerForEvent(1L, 10L)
             );
 
-            verify(eventRepository).incrementRegisteredCountIfCapacityAvailable(10L);
-            verify(registrationRepository).saveAndFlush(any(Registration.class));
+            verify(registrationTransactionService).registerForEvent(1L, 10L);
         }
 
         @Test
@@ -181,7 +183,7 @@ class RegistrationServiceTest {
                     () -> registrationService.registerForEvent(1L, 10L)
             );
 
-            verify(eventRepository, never()).findByIdForUpdate(10L);
+            verify(eventRepository, never()).findById(10L);
             verify(registrationRepository, never()).findByUser_IdAndEvent_Id(1L, 10L);
             verify(registrationRepository, never()).saveAndFlush(any(Registration.class));
         }
@@ -191,7 +193,7 @@ class RegistrationServiceTest {
         void shouldThrowWhenEventDoesNotExist() {
             when(userRepository.findById(1L))
                     .thenReturn(Optional.of(sampleUser));
-            when(eventRepository.findByIdForUpdate(10L))
+            when(eventRepository.findById(10L))
                     .thenReturn(Optional.empty());
 
             assertThrows(
@@ -210,7 +212,7 @@ class RegistrationServiceTest {
                     .thenReturn(Optional.of(sampleUser));
 
             sampleEvent.setStatus(EventStatus.CLOSED);
-            when(eventRepository.findByIdForUpdate(10L))
+            when(eventRepository.findById(10L))
                     .thenReturn(Optional.of(sampleEvent));
 
             assertThrows(
@@ -219,6 +221,25 @@ class RegistrationServiceTest {
             );
 
             verify(registrationRepository, never()).saveAndFlush(any(Registration.class));
+            verify(eventOfferLifecycle, never()).allocateAvailableForRegistration(anyLong());
+            verifyNoInteractions(registrationTransactionService);
+        }
+
+        @Test
+        @DisplayName("Rejects the event owner without triggering offer allocation")
+        void shouldRejectEventOwnerBeforeAllocation() {
+            when(userRepository.findById(1L)).thenReturn(Optional.of(sampleUser));
+            sampleEvent.setOrganizerUserId(1L);
+            when(eventRepository.findById(10L)).thenReturn(Optional.of(sampleEvent));
+
+            assertThrows(
+                    BusinessRuleException.class,
+                    () -> registrationService.registerForEvent(1L, 10L)
+            );
+
+            verify(eventOfferLifecycle, never())
+                    .allocateAvailableForRegistration(anyLong());
+            verifyNoInteractions(registrationTransactionService);
         }
 
         @Test
@@ -227,8 +248,8 @@ class RegistrationServiceTest {
             when(userRepository.findById(1L))
                     .thenReturn(Optional.of(sampleUser));
 
-            sampleEvent.setStartTime(LocalDateTime.now().minusMinutes(1));
-            when(eventRepository.findByIdForUpdate(10L))
+            sampleEvent.setStartTime(LocalDateTime.now(clock).minusMinutes(1));
+            when(eventRepository.findById(10L))
                     .thenReturn(Optional.of(sampleEvent));
 
             assertThrows(
@@ -237,6 +258,8 @@ class RegistrationServiceTest {
             );
 
             verify(registrationRepository, never()).saveAndFlush(any(Registration.class));
+            verify(eventOfferLifecycle, never()).allocateAvailableForRegistration(anyLong());
+            verifyNoInteractions(registrationTransactionService);
         }
 
         @Test
@@ -244,20 +267,17 @@ class RegistrationServiceTest {
         void shouldThrowWhenEventIsFull() {
             when(userRepository.findById(1L))
                     .thenReturn(Optional.of(sampleUser));
-            when(eventRepository.findByIdForUpdate(10L))
+            when(eventRepository.findById(10L))
                     .thenReturn(Optional.of(sampleEvent));
-            when(registrationRepository.findByUser_IdAndEvent_Id(1L, 10L))
-                    .thenReturn(Optional.empty());
-            when(eventRepository.incrementRegisteredCountIfCapacityAvailable(10L))
-                    .thenReturn(0); // Simulate event is full
+            when(registrationTransactionService.registerForEvent(1L, 10L))
+                    .thenThrow(new EventFullException("full"));
 
             assertThrows(
                     EventFullException.class,
                     () -> registrationService.registerForEvent(1L, 10L)
             );
 
-            verify(eventRepository).incrementRegisteredCountIfCapacityAvailable(10L);
-            verify(registrationRepository, never()).saveAndFlush(any(Registration.class));
+            verify(registrationTransactionService).registerForEvent(1L, 10L);
         }
 
         @Test
@@ -265,29 +285,19 @@ class RegistrationServiceTest {
         void shouldThrowWhenReRegisteringAndEventIsFull() {
             when(userRepository.findById(1L))
                     .thenReturn(Optional.of(sampleUser));
-            when(eventRepository.findByIdForUpdate(10L))
+            when(eventRepository.findById(10L))
                     .thenReturn(Optional.of(sampleEvent));
 
-            Registration canceledRegistration = new Registration(sampleUser, sampleEvent);
-            canceledRegistration.cancel();
-
-            when(registrationRepository.findByUser_IdAndEvent_Id(1L, 10L))
-                    .thenReturn(Optional.of(canceledRegistration));
-            when(eventRepository.incrementRegisteredCountIfCapacityAvailable(10L))
-                    .thenReturn(0); // Simulate event is full
+            when(registrationTransactionService.registerForEvent(1L, 10L))
+                    .thenThrow(new EventFullException("full"));
 
             assertThrows(
                     EventFullException.class,
                     () -> registrationService.registerForEvent(1L, 10L)
             );
 
-            verify(eventRepository).incrementRegisteredCountIfCapacityAvailable(10L);
-            verify(registrationRepository, never()).save(any(Registration.class));
-
-            assertEquals(
-                    RegistrationStatus.CANCELLED,
-                    canceledRegistration.getStatus()
-            );
+            verify(eventOfferLifecycle).allocateAvailableForRegistration(10L);
+            verify(registrationTransactionService).registerForEvent(1L, 10L);
         }
     }
 
@@ -429,7 +439,7 @@ class RegistrationServiceTest {
         @DisplayName("Rejects cancellation after the event has started")
         void shouldRejectCancellationAfterEventStarts() {
             Registration registration = new Registration(sampleUser, sampleEvent);
-            sampleEvent.setStartTime(LocalDateTime.now().minusMinutes(1));
+            sampleEvent.setStartTime(LocalDateTime.now(clock).minusMinutes(1));
             lenient().when(registrationRepository.findEventIdForUser(20L, 1L)).thenReturn(Optional.of(10L));
             when(registrationRepository.findById(20L)).thenReturn(Optional.of(registration));
             when(eventRepository.findByIdForUpdate(10L)).thenReturn(Optional.of(sampleEvent));
