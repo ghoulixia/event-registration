@@ -20,8 +20,8 @@ public class EventOfferLifecycleAdapter implements EventOfferLifecycle {
     }
 
     @Override
-    public void allocateAvailable(Event event, LocalDateTime now) {
-        slotOffers.allocateAvailableSlotsToWaitlist(event, now);
+    public void allocateAvailable(Long eventId, LocalDateTime now) {
+        slotOffers.allocateAvailableSlotsToWaitlist(eventId, now);
     }
 
     @Override

@@ -159,7 +159,7 @@ class EventOfferLifecycleIntegrationTest extends PostgresTestSupport {
             return new OfferFixtureState();
         }
         @Bean @Primary
-        OfferFixture offerFixture(OfferFixtureState state) { return new OfferFixture(state); }
+        OfferFixture offerFixture(OfferFixtureState state, EventRepository eventRepository) { return new OfferFixture(state, eventRepository); }
     }
     static class OfferFixtureState {
         final List<String> calls = new ArrayList<>();
@@ -170,13 +170,15 @@ class EventOfferLifecycleIntegrationTest extends PostgresTestSupport {
     // Simulates allocation to verify Event transaction boundaries.
     static class OfferFixture implements EventOfferLifecycle {
         private final OfferFixtureState state;
-        OfferFixture(OfferFixtureState state) { this.state = state; }
+        private final EventRepository eventRepository;
+        OfferFixture(OfferFixtureState state, EventRepository eventRepository) { this.state = state; this.eventRepository = eventRepository; }
         void called(String action) {
             assertTrue(TransactionSynchronizationManager.isActualTransactionActive(), "Lifecycle hook must join the Event transaction");
             state.calls.add(action);
         }
-        public void allocateAvailable(Event event, LocalDateTime now) {
+        public void allocateAvailable(Long eventId, LocalDateTime now) {
             called("allocate");
+            Event event = eventRepository.findById(eventId).orElseThrow(() -> new IllegalArgumentException("Event not found"));
             if (state.allocateOne && event.getRegisteredCount()+event.getHeldCount()<event.getCapacity()) event.setHeldCount(event.getHeldCount()+1);
             if (state.failAfterAllocation) throw new IllegalStateException("Offer provider failed");
         }

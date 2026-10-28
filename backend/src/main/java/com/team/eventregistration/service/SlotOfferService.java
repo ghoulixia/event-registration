@@ -15,6 +15,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import java.time.Clock;
 import java.time.LocalDateTime;
@@ -85,6 +86,12 @@ public class SlotOfferService {
     public void allocateAvailableSlotsToWaitlist(Long eventId) {
         Event event = lockEvent(eventId);
         allocateAvailableSlotsToWaitlist(event, now());
+    }
+
+    @Transactional
+    public void allocateAvailableSlotsToWaitlist(Long eventId, LocalDateTime at) {
+        Event event = lockEvent(eventId);
+        allocateAvailableSlotsToWaitlist(event, at);
     }
 
     @Transactional

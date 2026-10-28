@@ -27,6 +27,8 @@ class EventOfferLifecycleAdapterTest {
         EventOfferLifecycleAdapter adapter = new EventOfferLifecycleAdapter(slotOffers);
         LocalDateTime now = LocalDateTime.now();
         List<OwnerWaitlistResponse> waiting = List.of();
+
+        when(event.getId()).thenReturn(1L);
         when(slotOffers.latestPendingExpiry(event)).thenReturn(Optional.of(now));
         when(slotOffers.waitingCount(event)).thenReturn(2L);
         when(slotOffers.waitingList(event)).thenReturn(waiting);
@@ -40,7 +42,8 @@ class EventOfferLifecycleAdapterTest {
         assertEquals(Optional.of(now), adapter.latestPendingExpiry(event));
         assertEquals(2L, adapter.waitingCount(event));
         assertEquals(waiting, adapter.waitingList(event));
-        verify(slotOffers).allocateAvailableSlotsToWaitlist(event, now);
+
+        verify(slotOffers).allocateAvailableSlotsToWaitlist(1L, now);
         verify(slotOffers).allocateAvailableSlotsToWaitlist(8L);
         verify(slotOffers).withdrawOffer(event, offer, now);
         verify(slotOffers).close(event, now);

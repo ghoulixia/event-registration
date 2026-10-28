@@ -3,8 +3,6 @@ package com.team.eventregistration.service;
 import com.team.eventregistration.dto.RegistrationResponse;
 import com.team.eventregistration.entity.*;
 import com.team.eventregistration.exception.BusinessRuleException;
-import com.team.eventregistration.exception.DuplicateRegistrationException;
-import com.team.eventregistration.exception.EventFullException;
 import com.team.eventregistration.exception.ResourceNotFoundException;
 import com.team.eventregistration.repository.EventRepository;
 import com.team.eventregistration.repository.RegistrationRepository;
@@ -158,7 +156,7 @@ public class RegistrationService {
                 details
         );
 
-        eventOfferLifecycle.allocateAvailable(event, now);
+        eventOfferLifecycle.allocateAvailable(eventId, now);
     }
 
     private RegistrationResponse mapToResponse(Registration registration) {

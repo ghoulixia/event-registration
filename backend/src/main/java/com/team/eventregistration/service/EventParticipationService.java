@@ -103,6 +103,6 @@ public class EventParticipationService implements EventParticipation {
     private void allocate(Event event, LocalDateTime now) {
         if (event.getDeletedAt() == null && event.getStatus() == EventStatus.OPEN
                 && now.isBefore(event.getStartTime()))
-            offers.allocateAvailable(event, now);
+            offers.allocateAvailable(event.getId(), now);
     }
 }
