@@ -13,8 +13,11 @@ import org.springframework.transaction.annotation.Transactional;
 
 @Service
 public class AuditLogService {
-    private static final Set<String> ACTIONS = Set.of("EVENT_CREATE", "EVENT_UPDATE", "EVENT_OPEN",
-            "EVENT_CLOSE", "EVENT_DELETE", "PARTICIPANT_REMOVE");
+    private static final Set<String> ACTIONS = Set.of(
+            "EVENT_CREATE", "EVENT_UPDATE", "EVENT_OPEN",
+            "EVENT_CLOSE", "EVENT_DELETE", "PARTICIPANT_REMOVE",
+            "REGISTRATION_CONFIRM", "REGISTRATION_CANCEL"
+            );
     private final AuditLogRepository logs;
     private final UserRepository users;
 

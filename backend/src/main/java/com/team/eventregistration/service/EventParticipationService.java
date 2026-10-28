@@ -4,6 +4,7 @@ import com.team.eventregistration.dto.OwnerWaitlistResponse;
 import com.team.eventregistration.dto.ParticipantRemoval;
 import com.team.eventregistration.dto.ParticipantResponse;
 import com.team.eventregistration.entity.Event;
+import com.team.eventregistration.entity.EventStatus;
 import com.team.eventregistration.entity.Registration;
 import com.team.eventregistration.entity.RegistrationStatus;
 import com.team.eventregistration.exception.EventConflictException;
@@ -13,31 +14,44 @@ import com.team.eventregistration.service.port.EventOfferLifecycle;
 import com.team.eventregistration.service.port.EventParticipation;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+
 import java.time.LocalDateTime;
 import java.util.Comparator;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 
 @Service
 @Transactional
 public class EventParticipationService implements EventParticipation {
     private final RegistrationRepository registrations;
-    private final Optional<EventOfferLifecycle> offers;
+    private final EventOfferLifecycle offers;
+    private final AuditLogService auditLogService;
 
-    public EventParticipationService(RegistrationRepository registrations, Optional<EventOfferLifecycle> offers) {
+    public EventParticipationService(
+            RegistrationRepository registrations,
+            EventOfferLifecycle offers,
+            AuditLogService auditLogService
+    ) {
         this.registrations = registrations;
         this.offers = offers;
+        this.auditLogService = auditLogService;
     }
 
-    public void afterCapacityIncrease(Event event, LocalDateTime now) { allocate(event, now); }
-    public void reopen(Event event, LocalDateTime now) { allocate(event, now); }
-    public void close(Event event, LocalDateTime now) {
-        requireOfferHandler(event);
-        offers.ifPresent(handler -> handler.close(event, now));
+    public void afterCapacityIncrease(Event event, LocalDateTime now) {
+        allocate(event, now);
     }
+
+    public void reopen(Event event, LocalDateTime now) {
+        allocate(event, now);
+    }
+
+    public void close(Event event, LocalDateTime now) {
+        offers.close(event, now);
+    }
+
     public void delete(Event event, LocalDateTime now) {
-        requireOfferHandler(event);
-        offers.ifPresent(handler -> handler.delete(event, now));
+        offers.delete(event, now);
     }
 
     public ParticipantRemoval removeParticipant(Event event, Long registrationId, Long actorId,
@@ -53,19 +67,18 @@ public class EventParticipationService implements EventParticipation {
             throw new EventConflictException("Participants cannot be removed after the event starts.");
         if (event.getRegisteredCount() <= 0)
             throw new EventConflictException("The event registration count is inconsistent.");
-        requireOfferHandler(event);
         registration.remove(now, actorId, reason);
-        event.setRegisteredCount(event.getRegisteredCount() - 1);
         registrations.save(registration);
+        event.setRegisteredCount(event.getRegisteredCount() - 1);
         allocate(event, now);
         return new ParticipantRemoval(registration.getId(), registration.getUser().getId(), true);
     }
 
     @Transactional(readOnly = true)
     public Optional<LocalDateTime> latestPendingExpiry(Event event) {
-        requireOfferHandler(event);
-        return offers.flatMap(handler -> handler.latestPendingExpiry(event));
+        return offers.latestPendingExpiry(event);
     }
+
     @Transactional(readOnly = true)
     public List<ParticipantResponse> participants(Event event) {
         return registrations.findByEvent_Id(event.getId()).stream()
@@ -76,21 +89,20 @@ public class EventParticipationService implements EventParticipation {
                         item.getRegisteredAt(), item.getCancelledAt(), item.getRemovedAt(), item.getRemovedReason()))
                 .toList();
     }
+
     @Transactional(readOnly = true)
     public List<OwnerWaitlistResponse> waitingList(Event event) {
-        return offers.map(handler -> handler.waitingList(event)).orElseGet(List::of);
+        return offers.waitingList(event);
     }
+
     @Transactional(readOnly = true)
-    public long waitingCount(Event event) { return offers.map(handler -> handler.waitingCount(event)).orElse(0L); }
+    public long waitingCount(Event event) {
+        return offers.waitingCount(event);
+    }
 
     private void allocate(Event event, LocalDateTime now) {
-        requireOfferHandler(event);
-        if (event.getDeletedAt() == null && event.getStatus() == com.team.eventregistration.entity.EventStatus.OPEN
+        if (event.getDeletedAt() == null && event.getStatus() == EventStatus.OPEN
                 && now.isBefore(event.getStartTime()))
-            offers.ifPresent(handler -> handler.allocateAvailable(event, now));
-    }
-    private void requireOfferHandler(Event event) {
-        if (event.getHeldCount() > 0 && offers.isEmpty())
-            throw new EventConflictException("Pending offers require their lifecycle handler before this action.");
+            offers.allocateAvailable(event, now);
     }
 }

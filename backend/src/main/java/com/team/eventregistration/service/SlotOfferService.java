@@ -1,5 +1,6 @@
 package com.team.eventregistration.service;
 
+import com.team.eventregistration.dto.OwnerWaitlistResponse;
 import com.team.eventregistration.entity.*;
 import com.team.eventregistration.exception.BusinessRuleException;
 import com.team.eventregistration.exception.ResourceNotFoundException;
@@ -17,10 +18,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Clock;
 import java.time.LocalDateTime;
-import java.util.HashSet;
-import java.util.List;
-import java.util.Optional;
-import java.util.Set;
+import java.util.*;
 
 @Service
 public class SlotOfferService {
@@ -28,6 +26,7 @@ public class SlotOfferService {
     private final EventRepository eventRepository;
     private final WaitlistEntryRepository waitlistEntryRepository;
     private final RegistrationRepository registrationRepository;
+    private final AuditLogService auditLogService;
     private final Clock clock;
 
     @PersistenceContext
@@ -38,10 +37,11 @@ public class SlotOfferService {
             SlotOfferRepository slotOfferRepository,
             EventRepository eventRepository,
             WaitlistEntryRepository waitlistEntryRepository,
-            RegistrationRepository registrationRepository
+            RegistrationRepository registrationRepository,
+            AuditLogService auditLogService
     ) {
         this(slotOfferRepository, eventRepository, waitlistEntryRepository,
-                registrationRepository, Clock.systemDefaultZone());
+                registrationRepository, auditLogService, Clock.systemDefaultZone());
     }
 
     public SlotOfferService(
@@ -49,12 +49,14 @@ public class SlotOfferService {
             EventRepository eventRepository,
             WaitlistEntryRepository waitlistEntryRepository,
             RegistrationRepository registrationRepository,
+            AuditLogService auditLogService,
             Clock clock
     ) {
         this.slotOfferRepository = slotOfferRepository;
         this.eventRepository = eventRepository;
         this.waitlistEntryRepository = waitlistEntryRepository;
         this.registrationRepository = registrationRepository;
+        this.auditLogService = auditLogService;
         this.clock = clock;
     }
 
@@ -82,15 +84,77 @@ public class SlotOfferService {
     @Transactional
     public void allocateAvailableSlotsToWaitlist(Long eventId) {
         Event event = lockEvent(eventId);
-        LocalDateTime now = now();
-        if (!isOpenAndUpcoming(event, now)) {
+        allocateAvailableSlotsToWaitlist(event, now());
+    }
+
+    @Transactional
+    public void allocateAvailableSlotsToWaitlist(Event event, LocalDateTime at) {
+        if (!isOpenAndUpcoming(event, at)) {
             return;
         }
 
-        while (availableSlots(event) > 0
-                && offerNextWaitingEntry(event, now).isPresent()) {
-            // Allocate every available slot before direct registration can use one.
+        while (availableSlots(event) > 0) {
+            Optional<SlotOffer> offer = offerNextWaitingEntry(event, at);
+            if (offer.isEmpty()) {
+                break;
+            }
         }
+    }
+
+    @Transactional
+    public void close(Event event, LocalDateTime at) {
+        if (at.isBefore(event.getStartTime())) {
+            finishTemporarilyClosedWaitlistLocked(event, at);
+        } else {
+            finishInactiveWaitlistLocked(event, at);
+        }
+    }
+
+    @Transactional
+    public void delete(Event event, LocalDateTime at) {
+        finishDeletedWaitlistLocked(event, at);
+    }
+
+    @Transactional(readOnly = true)
+    public Optional<LocalDateTime> latestPendingExpiry(Event event) {
+        return slotOfferRepository.findByEvent_IdAndStatus(event.getId(), SlotOfferStatus.PENDING)
+                .stream()
+                .map(SlotOffer::getExpiresAt)
+                .max(Comparator.naturalOrder());
+    }
+
+    @Transactional(readOnly = true)
+    public long waitingCount(Event event) {
+        return waitlistEntryRepository
+                .findByEvent_IdAndStatusOrderByJoinedAtAscIdAsc(
+                        event.getId(), WaitlistEntryStatus.WAITING)
+                .size();
+    }
+
+    @Transactional(readOnly = true)
+    public List<OwnerWaitlistResponse> waitingList(Event event) {
+        List<WaitlistEntry> waiting = waitlistEntryRepository
+                .findByEvent_IdAndStatusOrderByJoinedAtAscIdAsc(
+                        event.getId(), WaitlistEntryStatus.WAITING);
+        List<WaitlistEntry> offered = waitlistEntryRepository
+                .findByEvent_IdAndStatusOrderByJoinedAtAscIdAsc(
+                        event.getId(), WaitlistEntryStatus.OFFERED);
+
+        List<WaitlistEntry> entries = new ArrayList<>(waiting);
+        entries.addAll(offered);
+        return entries.stream()
+                .map(entry -> new OwnerWaitlistResponse(
+                        entry.getId(),
+                        event.getId(),
+                        event.getTitle(),
+                        entry.getUser().getId(),
+                        entry.getUser().getDisplayName(),
+                        entry.getStatus().name(),
+                        entry.getJoinedAt(),
+                        entry.getStatus() == WaitlistEntryStatus.WAITING
+                                ? waiting.indexOf(entry) + 1
+                                : null))
+                .toList();
     }
 
     @Transactional(
@@ -136,20 +200,41 @@ public class SlotOfferService {
                     "User already has a confirmed registration for this event.");
         }
 
+        String previousStatus = (registration != null) ? registration.getStatus().name() : "NONE";
+
         entry.accept();
         offer.setStatus(SlotOfferStatus.ACCEPTED);
         offer.setResolvedAt(now);
         acceptHeldSlot(event);
 
         if (registration == null) {
-            registration = new Registration(offer.getUser(), event);
+            registration = new Registration(offer.getUser(), event, now);
         } else {
-            registration.confirmAgain();
+            registration.confirmAgain(now);
         }
 
-        registrationRepository.save(registration);
+        Registration savedRegistration = registrationRepository.saveAndFlush(registration);
         waitlistEntryRepository.save(entry);
-        return slotOfferRepository.save(offer);
+        SlotOffer savedOffer = slotOfferRepository.save(offer);
+
+        Map<String, Object> details = Map.of(
+                "previous_status", previousStatus,
+                "new_status", RegistrationStatus.CONFIRMED.name(),
+                "registration_id", savedRegistration.getId(),
+                "user_id", userId,
+                "offer_id", savedOffer.getId(),
+                "registered_at", now.toString()
+        );
+
+        auditLogService.recordEventAction(
+                event.getId(),
+                userId,
+                "REGISTRATION_CONFIRM",
+                "Accepted slot offer from waitlist",
+                details
+        );
+
+        return savedOffer;
     }
 
     @Transactional(
@@ -187,7 +272,7 @@ public class SlotOfferService {
             }
             throw outcomeException(offer);
         } else {
-            entry.leave();
+            entry.leave(now);
             offer.setStatus(SlotOfferStatus.DECLINED);
             offer.setResolvedAt(now);
             decrementHeldCount(event);
@@ -197,6 +282,36 @@ public class SlotOfferService {
 
         if (isOpenAndUpcoming(event, now)) {
             offerNextWaitingEntry(event, now);
+        }
+    }
+
+    @Transactional
+    public void withdrawOffer(Event event, SlotOffer offer, LocalDateTime at) {
+        if (offer.getStatus() != SlotOfferStatus.PENDING
+                || offer.getEvent().getId() == null
+                || !offer.getEvent().getId().equals(event.getId())) {
+            throw new BusinessRuleException("Slot offer is not pending for this event.");
+        }
+
+        WaitlistEntry entry = offer.getWaitlistEntry();
+        if (entry.getStatus() != WaitlistEntryStatus.OFFERED) {
+            throw new BusinessRuleException(
+                    "Pending offer is not associated with an offered waitlist entry.");
+        }
+
+        if (!at.isBefore(offer.getExpiresAt())) {
+            expireOffer(offer, at);
+        } else {
+            entry.leave(at);
+            offer.setStatus(SlotOfferStatus.DECLINED);
+            offer.setResolvedAt(at);
+            decrementHeldCount(event);
+            waitlistEntryRepository.save(entry);
+            slotOfferRepository.save(offer);
+        }
+
+        if (isOpenAndUpcoming(event, at)) {
+            offerNextWaitingEntry(event, at);
         }
     }
 
@@ -235,20 +350,32 @@ public class SlotOfferService {
         return expiredCount;
     }
 
-    private int processEventOffersLocked(Event event, LocalDateTime at) {
-        int newlyExpired = expirePendingOffers(event, at);
-        if (!isOpenAndUpcoming(event, at)) {
-            finishInactiveWaitlistLocked(event, at);
-        } else if (newlyExpired > 0) {
-            offerNextWaitingEntry(event, at);
-        }
-        return newlyExpired;
-    }
-
     @Transactional
     public void finishWaitlistAtEventStart(Long eventId) {
         Event event = lockEvent(eventId);
         finishWaitlistAtEventStartLocked(event, now());
+    }
+
+    private int processEventOffersLocked(Event event, LocalDateTime at) {
+        if (event.getDeletedAt() != null) {
+            finishDeletedWaitlistLocked(event, at);
+            return 0;
+        }
+        if (!at.isBefore(event.getStartTime())) {
+            int newlyExpired = expirePendingOffers(event, at);
+            finishInactiveWaitlistLocked(event, at);
+            return newlyExpired;
+        }
+        if (event.getStatus() != EventStatus.OPEN) {
+            finishTemporarilyClosedWaitlistLocked(event, at);
+            return 0;
+        }
+
+        int newlyExpired = expirePendingOffers(event, at);
+        if (newlyExpired > 0) {
+            offerNextWaitingEntry(event, at);
+        }
+        return newlyExpired;
     }
 
     private void finishWaitlistAtEventStartLocked(Event event, LocalDateTime at) {
@@ -257,6 +384,33 @@ public class SlotOfferService {
         }
 
         finishInactiveWaitlistLocked(event, at);
+    }
+
+    private void finishTemporarilyClosedWaitlistLocked(Event event, LocalDateTime at) {
+        for (SlotOffer offer : slotOfferRepository.findByEvent_IdAndStatus(
+                event.getId(), SlotOfferStatus.PENDING)) {
+            if (at.isBefore(offer.getExpiresAt())) {
+                revokeOfferAndRestoreWaiting(offer, at);
+            } else {
+                expireOffer(offer, at);
+            }
+        }
+        validateCounters(event);
+    }
+
+    private void finishDeletedWaitlistLocked(Event event, LocalDateTime at) {
+        for (SlotOffer offer : slotOfferRepository.findByEvent_IdAndStatus(
+                event.getId(), SlotOfferStatus.PENDING)) {
+            revokeOffer(offer, at);
+        }
+
+        for (WaitlistEntry entry : waitlistEntryRepository
+                .findByEvent_IdAndStatusOrderByJoinedAtAscIdAsc(
+                        event.getId(), WaitlistEntryStatus.WAITING)) {
+            entry.cancel();
+            waitlistEntryRepository.save(entry);
+        }
+        validateCounters(event);
     }
 
     private void finishInactiveWaitlistLocked(Event event, LocalDateTime at) {
@@ -276,6 +430,23 @@ public class SlotOfferService {
             waitlistEntryRepository.save(entry);
         }
         validateCounters(event);
+    }
+
+    private void revokeOfferAndRestoreWaiting(SlotOffer offer, LocalDateTime at) {
+        if (offer.getStatus() != SlotOfferStatus.PENDING) {
+            return;
+        }
+        WaitlistEntry entry = offer.getWaitlistEntry();
+        if (entry.getStatus() != WaitlistEntryStatus.OFFERED) {
+            throw new BusinessRuleException(
+                    "Pending offer has an inconsistent waitlist entry status.");
+        }
+        offer.setStatus(SlotOfferStatus.REVOKED);
+        offer.setResolvedAt(at);
+        entry.restoreWaiting();
+        releaseHeldSlotIfPresent(offer.getEvent());
+        waitlistEntryRepository.save(entry);
+        slotOfferRepository.save(offer);
     }
 
     private Optional<SlotOffer> offerNextWaitingEntry(Event event, LocalDateTime at) {

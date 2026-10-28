@@ -39,8 +39,10 @@ public class Registration {
 
     @Column(name = "removed_at")
     private LocalDateTime removedAt;
+
     @Column(name = "removed_reason", length = 1000)
     private String removedReason;
+
     @Column(name = "removed_by_user_id")
     private Long removedByUserId;
 

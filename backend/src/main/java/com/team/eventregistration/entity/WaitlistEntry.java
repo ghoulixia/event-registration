@@ -59,11 +59,15 @@ public class WaitlistEntry {
     }
 
     public void leave() {
+        leave(LocalDateTime.now());
+    }
+
+    public void leave(LocalDateTime leftAt) {
         if (this.status == WaitlistEntryStatus.LEFT) {
             return;
         }
         this.status = WaitlistEntryStatus.LEFT;
-        this.leftAt = LocalDateTime.now();
+        this.leftAt = leftAt;
     }
 
     public void skip() {
@@ -84,6 +88,15 @@ public class WaitlistEntry {
         }
         this.status = WaitlistEntryStatus.CANCELLED;
         this.leftAt = LocalDateTime.now();
+    }
+
+    public void restoreWaiting() {
+        if (this.status != WaitlistEntryStatus.OFFERED) {
+            throw new IllegalStateException(
+                    "Only OFFERED entries can be restored to WAITING."
+            );
+        }
+        this.status = WaitlistEntryStatus.WAITING;
     }
 
     public Long getId() { return id; }

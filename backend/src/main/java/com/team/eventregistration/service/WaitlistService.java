@@ -8,15 +8,19 @@ import com.team.eventregistration.exception.BusinessRuleException;
 import com.team.eventregistration.exception.DuplicateWaitlistEntryException;
 import com.team.eventregistration.exception.ResourceNotFoundException;
 import com.team.eventregistration.repository.*;
+import com.team.eventregistration.service.port.EventOfferLifecycle;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.hibernate.exception.ConstraintViolationException;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.Clock;
 import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.ZoneOffset;
 import java.util.List;
+import java.util.Objects;
 
 @Service
 public class WaitlistService {
@@ -25,19 +29,26 @@ public class WaitlistService {
     private final UserRepository userRepository;
     private final RegistrationRepository registrationRepository;
     private final SlotOfferRepository slotOfferRepository;
+    private final EventOfferLifecycle eventOfferLifecycle;
+    private final Clock clock;
 
+    @Autowired
     public WaitlistService(
             WaitlistEntryRepository waitlistEntryRepository,
             EventRepository eventRepository,
             UserRepository userRepository,
             RegistrationRepository registrationRepository,
-            SlotOfferRepository slotOfferRepository
+            SlotOfferRepository slotOfferRepository,
+            EventOfferLifecycle eventOfferLifecycle,
+            Clock clock
     ) {
         this.waitlistEntryRepository = waitlistEntryRepository;
         this.eventRepository = eventRepository;
         this.userRepository = userRepository;
         this.registrationRepository = registrationRepository;
         this.slotOfferRepository = slotOfferRepository;
+        this.eventOfferLifecycle = eventOfferLifecycle;
+        this.clock = clock;
     }
 
     @Transactional
@@ -46,15 +57,29 @@ public class WaitlistService {
                 .orElseThrow(() -> new ResourceNotFoundException("User not found with ID: " + userId));
         Event event = eventRepository.findByIdForUpdate(eventId)
                 .orElseThrow(() -> new ResourceNotFoundException("Event not found with ID: " + eventId));
+        LocalDateTime now = LocalDateTime.now(clock);
 
-        validateEventCanAcceptWaitlist(event);
+        if (Objects.equals(event.getOrganizerUserId(), userId)) {
+            throw new BusinessRuleException("Event owners cannot join the waitlist for their own events.");
+        }
+        if (event.getDeletedAt() != null || event.getStatus() != EventStatus.OPEN) {
+            throw new BusinessRuleException("Cannot join the waitlist for a closed event.");
+        }
+        if (!now.isBefore(event.getStartTime())) {
+            throw new BusinessRuleException("Cannot join the waitlist after the event has started.");
+        }
+        if (event.getRegisteredCount() + event.getHeldCount() < event.getCapacity()) {
+            throw new BusinessRuleException("The event still has available capacity.");
+        }
         if (registrationRepository.findByUser_IdAndEvent_Id(userId, eventId)
                 .filter(registration -> registration.getStatus() == RegistrationStatus.CONFIRMED)
                 .isPresent()) {
             throw new BusinessRuleException("A confirmed registration already exists for this event.");
         }
-        if (waitlistEntryRepository.findByUser_IdAndEvent_IdAndStatus(
-                userId, eventId, WaitlistEntryStatus.WAITING).isPresent()) {
+        if (waitlistEntryRepository.findByUser_IdAndEvent_IdAndStatusIn(
+                userId,
+                eventId,
+                List.of(WaitlistEntryStatus.WAITING, WaitlistEntryStatus.OFFERED)).isPresent()) {
             throw new DuplicateWaitlistEntryException("User is already waiting for this event.");
         }
 
@@ -74,11 +99,34 @@ public class WaitlistService {
 
     @Transactional
     public void leaveWaitlist(Long userId, Long eventId) {
+        Event event = eventRepository.findByIdForUpdate(eventId)
+                .filter(candidate -> candidate.getDeletedAt() == null)
+                .orElseThrow(() -> new ResourceNotFoundException(
+                        "Event not found with ID: " + eventId));
+        LocalDateTime now = LocalDateTime.now(clock);
+
         WaitlistEntry entry = waitlistEntryRepository
-                .findByUser_IdAndEvent_IdAndStatus(userId, eventId, WaitlistEntryStatus.WAITING)
+                .findByUser_IdAndEvent_IdAndStatusIn(
+                        userId,
+                        eventId,
+                        List.of(WaitlistEntryStatus.WAITING, WaitlistEntryStatus.OFFERED))
                 .orElseThrow(() -> new ResourceNotFoundException("Active waitlist entry not found."));
-        entry.leave();
-        waitlistEntryRepository.save(entry);
+
+        if (entry.getStatus() == WaitlistEntryStatus.WAITING) {
+            entry.leave(now);
+            waitlistEntryRepository.save(entry);
+            return;
+        }
+
+        SlotOffer offer = slotOfferRepository
+                .findByWaitlistEntry_IdAndStatus(entry.getId(), SlotOfferStatus.PENDING)
+                .orElseThrow(() -> new BusinessRuleException(
+                        "Offered waitlist entry has no pending slot offer."));
+
+        if (eventOfferLifecycle == null) {
+            throw new BusinessRuleException("Offer lifecycle is not configured.");
+        }
+        eventOfferLifecycle.withdrawOffer(event, offer, now);
     }
 
     @Transactional(readOnly = true)
@@ -136,19 +184,6 @@ public class WaitlistService {
 
         // 3. Return MyWaitlistResponse containing the list of WaitlistEntryResponse
         return new MyWaitlistResponse(entryResponses, Instant.now());
-    }
-
-    private void validateEventCanAcceptWaitlist(Event event) {
-        if (event.getDeletedAt() != null || event.getStatus() != EventStatus.OPEN) {
-            throw new BusinessRuleException("Cannot join the waitlist for a closed event.");
-        }
-        if (!LocalDateTime.now().isBefore(event.getStartTime())) {
-            throw new BusinessRuleException("Cannot join the waitlist after the event has started.");
-        }
-        int heldCount = event.getHeldCount() == null ? 0 : event.getHeldCount();
-        if (event.getRegisteredCount() + heldCount < event.getCapacity()) {
-            throw new BusinessRuleException("The event still has available capacity.");
-        }
     }
 
     private boolean isDuplicateWaitlistEntry(DataIntegrityViolationException ex) {
