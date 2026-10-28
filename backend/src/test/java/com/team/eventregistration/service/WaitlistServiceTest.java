@@ -224,7 +224,7 @@ class WaitlistServiceTest {
         offered.offer();
 
         SlotOffer pendingOffer = mock(SlotOffer.class);
-        LocalDateTime expiresAt = LocalDateTime.of(2026, 1, 1, 10, 10);
+        LocalDateTime expiresAt = LocalDateTime.ofInstant(clock.instant(), clock.getZone()).plusMinutes(10);
         when(pendingOffer.getId()).thenReturn(30L);
         when(pendingOffer.getStatus()).thenReturn(SlotOfferStatus.PENDING);
         when(pendingOffer.getExpiresAt()).thenReturn(expiresAt);
@@ -257,8 +257,8 @@ class WaitlistServiceTest {
         SlotOfferResponse offerResponse = offeredResponse.getOffer();
         assertEquals(30L, offerResponse.getId());
         assertEquals(SlotOfferStatus.PENDING, offerResponse.getStatus());
-        assertEquals(expiresAt.toInstant(ZoneOffset.UTC), offerResponse.getExpiresAt());
-        assertNotNull(result.getServerNow());
+        assertEquals(Duration.ofMinutes(10),
+                Duration.between(result.getServerNow(), offerResponse.getExpiresAt()));
     }
 
     private void prepareFullEventForJoin() {
