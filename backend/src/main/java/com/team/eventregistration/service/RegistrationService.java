@@ -27,6 +27,7 @@ public class RegistrationService {
     private final UserRepository userRepository;
     private final EventOfferLifecycle eventOfferLifecycle;
     private final AuditLogService auditLogService;
+    private final RegistrationTransactionService registrationTransactionService;
     private final Clock clock;
 
     public RegistrationService(
@@ -35,6 +36,7 @@ public class RegistrationService {
             UserRepository userRepository,
             EventOfferLifecycle eventOfferLifecycle,
             AuditLogService auditLogService,
+            RegistrationTransactionService registrationTransactionService,
             Clock clock
     ) {
         this.registrationRepository = registrationRepository;
@@ -42,15 +44,15 @@ public class RegistrationService {
         this.userRepository = userRepository;
         this.eventOfferLifecycle = eventOfferLifecycle;
         this.auditLogService = auditLogService;
+        this.registrationTransactionService = registrationTransactionService;
         this.clock = clock;
     }
 
-    @Transactional
     public RegistrationResponse registerForEvent(Long userId, Long eventId) {
-        User user = userRepository.findById(userId)
+        userRepository.findById(userId)
                 .orElseThrow(() -> new ResourceNotFoundException("User not found with ID: " + userId));
 
-        Event event = eventRepository.findByIdForUpdate(eventId)
+        Event event = eventRepository.findById(eventId)
                 .filter(candidate -> candidate.getDeletedAt() == null)
                 .orElseThrow(() -> new ResourceNotFoundException("Event not found with ID: " + eventId));
         LocalDateTime now = LocalDateTime.now(clock);
@@ -65,72 +67,9 @@ public class RegistrationService {
             throw new BusinessRuleException("Cannot register for an event that has already started.");
         }
 
-        eventOfferLifecycle.allocateAvailable(event, now);
+        eventOfferLifecycle.allocateAvailableForRegistration(eventId);
 
-        int unreservedSlots = event.getCapacity() - event.getRegisteredCount() - event.getHeldCount();
-        long waitingCount = eventOfferLifecycle.waitingCount(event);
-        if (unreservedSlots <= 0 && waitingCount > 0) {
-            throw new EventFullException("Event is full or has a waitlist. Please join the waitlist instead.");
-        }
-
-        Registration existingRegistration = registrationRepository
-                .findByUser_IdAndEvent_Id(userId, eventId)
-                .orElse(null);
-
-        Registration savedRegistration;
-        String previousStatus = null;
-
-        if (existingRegistration != null) {
-            if (existingRegistration.getStatus() == RegistrationStatus.CONFIRMED) {
-                throw new DuplicateRegistrationException("User has already registered for this event.");
-            }
-            if (existingRegistration.getStatus() == RegistrationStatus.REMOVED) {
-                throw new BusinessRuleException("Removed participants cannot register again for this event.");
-            }
-
-            previousStatus = existingRegistration.getStatus().name();
-
-            int updatedRows = eventRepository.incrementRegisteredCountIfCapacityAvailable(eventId);
-            if (updatedRows == 0) {
-                throw new EventFullException("Event is full. Cannot register.");
-            }
-
-            existingRegistration.confirmAgain(now);
-            savedRegistration = registrationRepository.save(existingRegistration);
-        } else {
-            int updatedRows = eventRepository.incrementRegisteredCountIfCapacityAvailable(eventId);
-            if (updatedRows == 0) {
-                throw new EventFullException("Event is full. Cannot register.");
-            }
-
-            Registration registration = new Registration(user, event, now);
-            try {
-                savedRegistration = registrationRepository.saveAndFlush(registration);
-            } catch (RuntimeException ex) {
-                if (RegistrationRepository.isDuplicateUserEvent(ex)) {
-                    throw new DuplicateRegistrationException("User has already registered for this event.");
-                }
-                throw ex;
-            }
-        }
-
-        Map<String, Object> details = Map.of(
-                "previous_status", previousStatus != null ? previousStatus : "NONE",
-                "new_status", RegistrationStatus.CONFIRMED.name(),
-                "registration_id", savedRegistration.getId(),
-                "user_id", userId,
-                "registered_at", now.toString()
-        );
-
-        auditLogService.recordEventAction(
-                eventId,
-                userId,
-                "REGISTRATION_CONFIRM",
-                previousStatus == null ? "Initial registration confirmed" : "Re-registration confirmed after cancellation",
-                details
-        );
-
-        return mapToResponse(savedRegistration);
+        return registrationTransactionService.registerForEvent(userId, eventId);
     }
 
     @Transactional(readOnly = true)

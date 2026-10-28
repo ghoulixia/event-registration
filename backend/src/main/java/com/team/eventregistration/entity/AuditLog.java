@@ -25,6 +25,7 @@ public class AuditLog {
     private String targetType;
     @Column(name = "target_id", nullable = false)
     private Long targetId;
+    @Column(name = "reason")
     private String reason;
     @JdbcTypeCode(SqlTypes.JSON)
     @Column(columnDefinition = "jsonb")
@@ -52,6 +53,7 @@ public class AuditLog {
     public Long getActorUserId() { return actorUserId; }
     public Map<String, Object> getDetails() { return details == null ? Map.of() : new LinkedHashMap<>(details); }
     public String getAction() { return action; }
+    public Long getTargetId() { return targetId; }
     public String getReason() { return reason; }
     public Instant getCreatedAt() { return createdAt; }
 }

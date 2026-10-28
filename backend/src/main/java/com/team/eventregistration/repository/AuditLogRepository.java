@@ -1,13 +1,25 @@
 package com.team.eventregistration.repository;
 
 import com.team.eventregistration.entity.AuditLog;
-import java.util.List;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Modifying;
+import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.repository.query.Param;
+import org.springframework.transaction.annotation.Transactional;
+
+import java.util.List;
 
 public interface AuditLogRepository extends JpaRepository<AuditLog, Long> {
     List<AuditLog> findByTargetTypeAndTargetIdOrderByCreatedAtDescIdDesc(String targetType, Long targetId);
+
     Page<AuditLog> findByTargetTypeAndTargetId(String targetType, Long targetId, Pageable pageable);
+
     Page<AuditLog> findByTargetTypeAndTargetIdAndAction(String targetType, Long targetId, String action, Pageable pageable);
+
+    @Modifying
+    @Transactional
+    @Query("DELETE FROM AuditLog a WHERE a.actorUserId = :userId")
+    void deleteByActorUserId(@Param("userId") Long userId);
 }

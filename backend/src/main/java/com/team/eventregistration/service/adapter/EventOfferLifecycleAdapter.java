@@ -25,6 +25,11 @@ public class EventOfferLifecycleAdapter implements EventOfferLifecycle {
     }
 
     @Override
+    public void allocateAvailableForRegistration(Long eventId) {
+        slotOffers.allocateAvailableSlotsToWaitlist(eventId);
+    }
+
+    @Override
     public void withdrawOffer(Event event, SlotOffer offer, LocalDateTime now) {
         slotOffers.withdrawOffer(event, offer, now);
     }
