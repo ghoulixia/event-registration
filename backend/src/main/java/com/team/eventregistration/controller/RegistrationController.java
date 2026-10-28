@@ -15,6 +15,7 @@ import java.util.List;
 @RestController
 @RequestMapping("/api")
 @Tag(name = "Registrations", description = "Register for events")
+@SecurityRequirement(name = "bearerAuth")
 public class RegistrationController {
     private final RegistrationService registrationService;
 
@@ -24,7 +25,6 @@ public class RegistrationController {
 
     @PostMapping("/events/{id}/registrations")
     @Operation(summary = "Register for an event", description = "Register for an event by ID.")
-    @SecurityRequirement(name = "bearerAuth")
     @ApiResponse(responseCode = "200", description = "Registration successful")
     @ApiResponse(responseCode = "400", description = "Invalid registration request")
     @ApiResponse(responseCode = "404", description = "User or Event not found")
@@ -39,7 +39,6 @@ public class RegistrationController {
 
     @GetMapping("/me/registrations")
     @Operation(summary = "Get my registrations", description = "Get all registrations for the authenticated user.")
-    @SecurityRequirement(name = "bearerAuth")
     @ApiResponse(responseCode = "200", description = "Registrations retrieved successfully")
     @ApiResponse(responseCode = "404", description = "User not found")
     public ResponseEntity<List<RegistrationResponse>> getMyRegistrations(
@@ -51,7 +50,6 @@ public class RegistrationController {
 
     @DeleteMapping("/registrations/{id}")
     @Operation(summary = "Cancel a registration", description = "Cancel an authenticated user's registration by ID.")
-    @SecurityRequirement(name = "bearerAuth")
     @ApiResponse(responseCode = "204", description = "Registration cancelled")
     @ApiResponse(responseCode = "400", description = "Event has already started or cancellation is not allowed")
     @ApiResponse(responseCode = "404", description = "Registration not found")

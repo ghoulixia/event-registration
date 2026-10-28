@@ -1,0 +1,7 @@
+ALTER TABLE audit_logs DROP CONSTRAINT IF EXISTS audit_logs_action_check;
+
+ALTER TABLE audit_logs ADD CONSTRAINT audit_logs_action_check
+    CHECK (action IN (
+    'EVENT_CREATE', 'EVENT_UPDATE', 'EVENT_OPEN', 'EVENT_CLOSE', 'EVENT_DELETE',
+    'PARTICIPANT_REMOVE', 'REGISTRATION_CONFIRM', 'REGISTRATION_CANCEL'
+    ));

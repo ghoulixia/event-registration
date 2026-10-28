@@ -33,10 +33,10 @@ public class Event {
     private Long organizerUserId;
 
     @Column(name = "held_count", nullable = false)
-    private int heldCount;
+    private Integer heldCount = 0;
 
     @Column(name = "offer_ttl_minutes", nullable = false)
-    private int offerTtlMinutes = 10;
+    private Integer offerTtlMinutes = 10;
 
     @Enumerated(EnumType.STRING)
     @Column(nullable = false, length = 20)
@@ -81,6 +81,8 @@ public class Event {
         if (this.updatedAt == null) this.updatedAt = now;
         if (this.status == null) this.status = EventStatus.OPEN;
         if (this.registeredCount == null) this.registeredCount = 0;
+        if (this.heldCount == null) this.heldCount = 0;
+        if (this.offerTtlMinutes == null) this.offerTtlMinutes = 10;
     }
 
     public Event() {}
@@ -99,10 +101,12 @@ public class Event {
 
     public Long getOrganizerUserId() { return organizerUserId; }
     public void setOrganizerUserId(Long organizerUserId) { this.organizerUserId = organizerUserId; }
-    public int getHeldCount() { return heldCount; }
-    public void setHeldCount(int heldCount) { this.heldCount = heldCount; }
-    public int getOfferTtlMinutes() { return offerTtlMinutes; }
-    public void setOfferTtlMinutes(int offerTtlMinutes) { this.offerTtlMinutes = offerTtlMinutes; }
+
+    public Integer getHeldCount() { return heldCount; }
+    public void setHeldCount(Integer heldCount) { this.heldCount = heldCount; }
+
+    public Integer getOfferTtlMinutes() { return offerTtlMinutes; }
+    public void setOfferTtlMinutes(Integer offerTtlMinutes) { this.offerTtlMinutes = offerTtlMinutes; }
 
     public City getCity() { return city; }
     public void setCity(City city) { this.city = city; }

@@ -39,8 +39,10 @@ public class Registration {
 
     @Column(name = "removed_at")
     private LocalDateTime removedAt;
+
     @Column(name = "removed_reason", length = 1000)
     private String removedReason;
+
     @Column(name = "removed_by_user_id")
     private Long removedByUserId;
 
@@ -84,7 +86,8 @@ public class Registration {
     }
 
     public void remove(LocalDateTime now, Long actorId, String reason) {
-        if (status != RegistrationStatus.CONFIRMED) throw new IllegalStateException("Registration is not confirmed.");
+        if (status != RegistrationStatus.CONFIRMED)
+            throw new IllegalStateException("Registration is not confirmed.");
         status = RegistrationStatus.REMOVED;
         removedAt = now;
         removedByUserId = actorId;

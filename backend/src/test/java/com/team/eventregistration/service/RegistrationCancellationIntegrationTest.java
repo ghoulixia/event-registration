@@ -9,11 +9,12 @@ import com.team.eventregistration.entity.EventStatus;
 import com.team.eventregistration.entity.Registration;
 import com.team.eventregistration.entity.RegistrationStatus;
 import com.team.eventregistration.entity.Role;
+import com.team.eventregistration.entity.SlotOfferStatus;
 import com.team.eventregistration.entity.User;
+import com.team.eventregistration.entity.WaitlistEntry;
+import com.team.eventregistration.entity.WaitlistEntryStatus;
 import com.team.eventregistration.exception.BusinessRuleException;
-import com.team.eventregistration.repository.EventRepository;
-import com.team.eventregistration.repository.RegistrationRepository;
-import com.team.eventregistration.repository.UserRepository;
+import com.team.eventregistration.repository.*;
 import jakarta.persistence.EntityManager;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -37,9 +38,13 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 class RegistrationCancellationIntegrationTest extends PostgresTestSupport {
     @Autowired private RegistrationService registrationService;
     @Autowired private RegistrationRepository registrationRepository;
+    @Autowired private SlotOfferRepository slotOfferRepository;
     @Autowired private EventRepository eventRepository;
     @Autowired private UserRepository userRepository;
+    @Autowired private WaitlistEntryRepository waitlistEntryRepository;
+    @Autowired private AuditLogRepository auditLogRepository;
     @Autowired private EntityManager entityManager;
+
 
     private User user;
     private Event event;
@@ -71,6 +76,9 @@ class RegistrationCancellationIntegrationTest extends PostgresTestSupport {
 
     @AfterEach
     void tearDown() {
+        if (user != null && user.getId() != null) {
+            auditLogRepository.deleteByActorUserId(user.getId());
+        }
         if (registration != null && registration.getId() != null) {
             registrationRepository.deleteById(registration.getId());
         }
@@ -105,8 +113,8 @@ class RegistrationCancellationIntegrationTest extends PostgresTestSupport {
         ExecutorService executor = Executors.newFixedThreadPool(2);
         try {
             List<java.util.concurrent.Future<Void>> results = executor.invokeAll(List.of(
-                    () -> cancelAndReturnNull(),
-                    () -> cancelAndReturnNull()));
+                    this::cancelAndReturnNull,
+                    this::cancelAndReturnNull));
 
             for (java.util.concurrent.Future<Void> result : results) {
                 try {
@@ -126,6 +134,33 @@ class RegistrationCancellationIntegrationTest extends PostgresTestSupport {
         assertEquals(RegistrationStatus.CANCELLED, cancelled.getStatus());
         assertNotNull(cancelled.getCancelledAt());
         assertEquals(0, updatedEvent.getRegisteredCount());
+    }
+
+    @Test
+    void shouldOfferReleasedSlotToFirstWaitingEntry() {
+        User waitingUser = userRepository.saveAndFlush(new User(
+                UUID.randomUUID() + "@test.com",
+                "Waiting User",
+                "test-password",
+                null,
+                Role.USER));
+        WaitlistEntry waitingEntry = waitlistEntryRepository.saveAndFlush(
+                new WaitlistEntry(waitingUser, event));
+
+        registrationService.cancelRegistration(user.getId(), registration.getId());
+        entityManager.clear();
+
+        assertEquals(RegistrationStatus.CANCELLED,
+                registrationRepository.findById(registration.getId()).orElseThrow().getStatus());
+        assertEquals(WaitlistEntryStatus.OFFERED,
+                waitlistEntryRepository.findById(waitingEntry.getId()).orElseThrow().getStatus());
+        assertEquals(SlotOfferStatus.PENDING,
+                slotOfferRepository.findByWaitlistEntry_IdAndStatus(
+                        waitingEntry.getId(), SlotOfferStatus.PENDING).orElseThrow().getStatus());
+
+        slotOfferRepository.deleteAll(slotOfferRepository.findByEvent_Id(event.getId()));
+        waitlistEntryRepository.deleteById(waitingEntry.getId());
+        userRepository.deleteById(waitingUser.getId());
     }
 
     private Void cancelAndReturnNull() {
