@@ -38,17 +38,6 @@ public class SlotOfferService {
             EventRepository eventRepository,
             WaitlistEntryRepository waitlistEntryRepository,
             RegistrationRepository registrationRepository,
-            AuditLogService auditLogService
-    ) {
-        this(slotOfferRepository, eventRepository, waitlistEntryRepository,
-                registrationRepository, auditLogService, Clock.systemDefaultZone());
-    }
-
-    public SlotOfferService(
-            SlotOfferRepository slotOfferRepository,
-            EventRepository eventRepository,
-            WaitlistEntryRepository waitlistEntryRepository,
-            RegistrationRepository registrationRepository,
             AuditLogService auditLogService,
             Clock clock
     ) {
@@ -490,7 +479,7 @@ public class SlotOfferService {
 
             entry.offer();
             SlotOffer offer = new SlotOffer(
-                    entry, event, entry.getUser(), expiresAt);
+                    entry, event, entry.getUser(), at, expiresAt);
             event.setHeldCount(event.getHeldCount() + 1);
             validateCounters(event);
             waitlistEntryRepository.save(entry);

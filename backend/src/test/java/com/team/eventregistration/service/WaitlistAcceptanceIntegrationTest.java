@@ -11,6 +11,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.JdbcTemplate;
 
+import java.time.Clock;
 import java.time.LocalDateTime;
 import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
@@ -37,6 +38,7 @@ class WaitlistAcceptanceIntegrationTest extends PostgresTestSupport {
     @Autowired private AuditLogRepository auditLogRepository;
     @Autowired private JdbcTemplate jdbc;
     @Autowired private EntityManager entityManager;
+    @Autowired private Clock clock;
 
     private final List<Long> eventIds = new ArrayList<>();
     private final List<Long> userIds = new ArrayList<>();
@@ -162,8 +164,8 @@ class WaitlistAcceptanceIntegrationTest extends PostgresTestSupport {
         WaitlistEntry nextEntry = entry(nextUser, event);
         SlotOffer offer = offers.offerNextWaitingEntry(event.getId()).orElseThrow();
 
-        LocalDateTime pastCreatedAt = LocalDateTime.now().minusMinutes(2);
-        LocalDateTime pastExpiresAt = LocalDateTime.now().minusMinutes(1);
+        LocalDateTime pastCreatedAt = LocalDateTime.now(clock).minusMinutes(2);
+        LocalDateTime pastExpiresAt = LocalDateTime.now(clock).minusMinutes(1);
         jdbc.update(
                 "UPDATE slot_offers SET created_at = ?, expires_at = ? WHERE id = ?",
                 pastCreatedAt,
@@ -271,7 +273,7 @@ class WaitlistAcceptanceIntegrationTest extends PostgresTestSupport {
         User user = user("ttl-cap");
         Event event = event(1);
         event.setOfferTtlMinutes(30);
-        event.setStartTime(LocalDateTime.now().plusMinutes(5).truncatedTo(ChronoUnit.MICROS));
+        event.setStartTime(LocalDateTime.now(clock).plusMinutes(5).truncatedTo(ChronoUnit.MICROS));
         event.setEndTime(event.getStartTime().plusHours(1));
         eventRepository.saveAndFlush(event);
         entry(user, event);
@@ -344,7 +346,7 @@ class WaitlistAcceptanceIntegrationTest extends PostgresTestSupport {
         event.setOrganizerName("Test Organizer");
         event.setCity(City.HANOI);
         event.setCategory(Category.TECHNOLOGY);
-        event.setStartTime(LocalDateTime.now().plusHours(2));
+        event.setStartTime(LocalDateTime.now(clock).plusHours(2));
         event.setEndTime(event.getStartTime().plusHours(1));
         event.setCapacity(capacity);
         event.setRegisteredCount(0);

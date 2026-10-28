@@ -1,7 +1,6 @@
 package com.team.eventregistration.entity;
 
 import jakarta.persistence.*;
-import org.hibernate.annotations.CreationTimestamp;
 
 import java.time.LocalDateTime;
 
@@ -29,7 +28,6 @@ public class SlotOffer {
     @Column(nullable = false, length = 20)
     private SlotOfferStatus status = SlotOfferStatus.PENDING;
 
-    @CreationTimestamp
     @Column(name = "created_at", nullable = false, updatable = false)
     private LocalDateTime createdAt;
 
@@ -46,11 +44,13 @@ public class SlotOffer {
             WaitlistEntry waitlistEntry,
             Event event,
             User user,
+            LocalDateTime createdAt,
             LocalDateTime expiresAt
     ) {
         this.waitlistEntry = waitlistEntry;
         this.event = event;
         this.user = user;
+        this.createdAt = createdAt;
         this.expiresAt = expiresAt;
         this.status = SlotOfferStatus.PENDING;
     }

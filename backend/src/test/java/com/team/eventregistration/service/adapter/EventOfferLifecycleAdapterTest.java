@@ -4,12 +4,16 @@ import com.team.eventregistration.dto.OwnerWaitlistResponse;
 import com.team.eventregistration.entity.Event;
 import com.team.eventregistration.entity.SlotOffer;
 import com.team.eventregistration.service.SlotOfferService;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
+import java.time.Clock;
+import java.time.Instant;
 import java.time.LocalDateTime;
+import java.time.ZoneId;
 import java.util.List;
 import java.util.Optional;
 
@@ -21,11 +25,19 @@ class EventOfferLifecycleAdapterTest {
     @Mock private SlotOfferService slotOffers;
     @Mock private Event event;
     @Mock private SlotOffer offer;
+    private Clock clock;
+
+    @BeforeEach
+    void setUp() {
+        Instant fixedInstant = Instant.parse("2026-10-10T10:00:00Z");
+        ZoneId zoneId = ZoneId.of("Asia/Ho_Chi_Minh");
+        clock = Clock.fixed(fixedInstant, zoneId);
+    }
 
     @Test
     void delegatesEveryLifecycleOperationToSlotOfferService() {
         EventOfferLifecycleAdapter adapter = new EventOfferLifecycleAdapter(slotOffers);
-        LocalDateTime now = LocalDateTime.now();
+        LocalDateTime now = LocalDateTime.now(clock);
         List<OwnerWaitlistResponse> waiting = List.of();
 
         when(event.getId()).thenReturn(1L);

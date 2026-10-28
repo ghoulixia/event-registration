@@ -9,6 +9,7 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 
+import java.time.Clock;
 import java.time.LocalDateTime;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
@@ -31,6 +32,7 @@ class SlotOfferServiceIntegrationTest {
     @Autowired private RegistrationRepository registrationRepository;
     @Autowired private AuditLogRepository auditLogRepository;
     @Autowired private EntityManager entityManager;
+    @Autowired private Clock clock;
 
     private final List<Long> createdUserIds = new ArrayList<>();
     private final List<Long> createdEventIds = new ArrayList<>();
@@ -56,7 +58,7 @@ class SlotOfferServiceIntegrationTest {
     @Test
     void acceptsOfferAndMovesHeldSlotToRegistration() {
         User user = saveUser("accept");
-        Event event = saveEvent(LocalDateTime.now().plusHours(2), 1);
+        Event event = saveEvent(LocalDateTime.now(clock).plusHours(2), 1);
         WaitlistEntry entry = saveEntry(user, event);
 
         SlotOffer offer = slotOfferService.offerNextWaitingEntry(event.getId()).orElseThrow();
@@ -78,7 +80,7 @@ class SlotOfferServiceIntegrationTest {
     @Test
     void expiresOfferAndReleasesHeldSlot() {
         User user = saveUser("expire");
-        Event event = saveEvent(LocalDateTime.now().plusHours(2), 1);
+        Event event = saveEvent(LocalDateTime.now(clock).plusHours(2), 1);
         saveEntry(user, event);
 
         SlotOffer offer = slotOfferService.offerNextWaitingEntry(event.getId()).orElseThrow();
@@ -97,7 +99,7 @@ class SlotOfferServiceIntegrationTest {
     void declinesOfferAndOffersNextWaitingEntryInFifoOrder() {
         User firstUser = saveUser("decline-first");
         User secondUser = saveUser("decline-second");
-        Event event = saveEvent(LocalDateTime.now().plusHours(2), 1);
+        Event event = saveEvent(LocalDateTime.now(clock).plusHours(2), 1);
         saveEntry(firstUser, event);
         saveEntry(secondUser, event);
 
@@ -121,7 +123,7 @@ class SlotOfferServiceIntegrationTest {
     void directRegistrationCannotBypassWaitingEntryWithAvailableCapacity() {
         User waitingUser = saveUser("priority-waiting");
         User directUser = saveUser("priority-direct");
-        Event event = saveEvent(LocalDateTime.now().plusHours(2), 1);
+        Event event = saveEvent(LocalDateTime.now(clock).plusHours(2), 1);
         saveEntry(waitingUser, event);
 
         assertThrows(EventFullException.class,
@@ -138,7 +140,7 @@ class SlotOfferServiceIntegrationTest {
     void concurrentDirectRegistrationsPreserveTheFinalSlotInvariant() throws Exception {
         User firstUser = saveUser("final-slot-first");
         User secondUser = saveUser("final-slot-second");
-        Event event = saveEvent(LocalDateTime.now().plusHours(2), 1);
+        Event event = saveEvent(LocalDateTime.now(clock).plusHours(2), 1);
 
         ExecutorService executor = Executors.newFixedThreadPool(2);
         try {
@@ -163,12 +165,12 @@ class SlotOfferServiceIntegrationTest {
     void temporaryCloseRevokesOfferAndRestoresEntryToWaiting() {
         User offeredUser = saveUser("close-offered");
         User waitingUser = saveUser("close-waiting");
-        Event event = saveEvent(LocalDateTime.now().plusHours(2), 1);
+        Event event = saveEvent(LocalDateTime.now(clock).plusHours(2), 1);
         WaitlistEntry offeredEntry = saveEntry(offeredUser, event);
         WaitlistEntry waitingEntry = saveEntry(waitingUser, event);
 
         SlotOffer offer = slotOfferService.offerNextWaitingEntry(event.getId()).orElseThrow();
-        slotOfferService.close(event, LocalDateTime.now());
+        slotOfferService.close(event, LocalDateTime.now(clock));
         entityManager.clear();
 
         assertEquals(SlotOfferStatus.REVOKED,
@@ -184,12 +186,12 @@ class SlotOfferServiceIntegrationTest {
     void softDeleteCancelsOfferedAndWaitingEntries() {
         User offeredUser = saveUser("delete-offered");
         User waitingUser = saveUser("delete-waiting");
-        Event event = saveEvent(LocalDateTime.now().plusHours(2), 1);
+        Event event = saveEvent(LocalDateTime.now(clock).plusHours(2), 1);
         WaitlistEntry offeredEntry = saveEntry(offeredUser, event);
         WaitlistEntry waitingEntry = saveEntry(waitingUser, event);
 
         SlotOffer offer = slotOfferService.offerNextWaitingEntry(event.getId()).orElseThrow();
-        slotOfferService.delete(event, LocalDateTime.now());
+        slotOfferService.delete(event, LocalDateTime.now(clock));
         entityManager.clear();
 
         assertEquals(SlotOfferStatus.REVOKED,
@@ -205,13 +207,13 @@ class SlotOfferServiceIntegrationTest {
     void eventStartExpiresAndRevokesPendingOffersAndCancelsWaitingEntries() {
         User offeredUser = saveUser("started-offered");
         User waitingUser = saveUser("started-waiting");
-        Event event = saveEvent(LocalDateTime.now().minusSeconds(1), 2);
+        Event event = saveEvent(LocalDateTime.now(clock).minusSeconds(1), 2);
         WaitlistEntry offeredEntry = new WaitlistEntry(offeredUser, event);
         offeredEntry.offer();
         waitlistEntryRepository.saveAndFlush(offeredEntry);
         WaitlistEntry waitingEntry = saveEntry(waitingUser, event);
         SlotOffer offer = slotOfferRepository.saveAndFlush(new SlotOffer(
-                offeredEntry, event, offeredUser, LocalDateTime.now().plusMinutes(5)));
+                offeredEntry, event, offeredUser, LocalDateTime.now(clock), LocalDateTime.now(clock).plusMinutes(5)));
         event.setHeldCount(1);
         eventRepository.saveAndFlush(event);
 
@@ -232,10 +234,10 @@ class SlotOfferServiceIntegrationTest {
     @Test
     void schedulerFinishesStartedEventsWithoutExpiredOffersAndAcceptLosesRace() throws Exception {
         User user = saveUser("race");
-        Event event = saveEvent(LocalDateTime.now().plusHours(1), 1);
+        Event event = saveEvent(LocalDateTime.now(clock).plusHours(1), 1);
         saveEntry(user, event);
         SlotOffer offer = slotOfferService.offerNextWaitingEntry(event.getId()).orElseThrow();
-        event.setStartTime(LocalDateTime.now().minusSeconds(1));
+        event.setStartTime(LocalDateTime.now(clock).minusSeconds(1));
         eventRepository.saveAndFlush(event);
 
         CountDownLatch ready = new CountDownLatch(2);

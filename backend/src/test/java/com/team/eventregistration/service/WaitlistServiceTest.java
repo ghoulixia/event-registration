@@ -11,9 +11,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.dao.DataIntegrityViolationException;
 
-import java.time.Clock;
-import java.time.LocalDateTime;
-import java.time.ZoneOffset;
+import java.time.*;
 import java.util.List;
 import java.util.Optional;
 
@@ -36,13 +34,16 @@ class WaitlistServiceTest {
 
     @BeforeEach
     void setUp() {
+        Instant fixedInstant = Instant.parse("2026-10-10T10:00:00Z");
+        ZoneId zoneId = ZoneId.of("Asia/Ho_Chi_Minh");
+        clock = Clock.fixed(fixedInstant, zoneId);
+
         waitlistEntryRepository = mock(WaitlistEntryRepository.class);
         eventRepository = mock(EventRepository.class);
         userRepository = mock(UserRepository.class);
         registrationRepository = mock(RegistrationRepository.class);
         slotOfferRepository = mock(SlotOfferRepository.class);
         eventOfferLifecycle = mock(EventOfferLifecycle.class);
-        clock = Clock.systemDefaultZone();
 
         waitlistService = new WaitlistService(
                 waitlistEntryRepository,
@@ -177,7 +178,7 @@ class WaitlistServiceTest {
         event.setRegisteredCount(1);
         event.setHeldCount(1);
         event.setStatus(EventStatus.OPEN);
-        event.setStartTime(LocalDateTime.now().plusHours(1));
+        event.setStartTime(LocalDateTime.now(clock).plusHours(1));
         when(userRepository.findById(1L)).thenReturn(Optional.of(firstUser));
         when(eventRepository.findByIdForUpdate(10L)).thenReturn(Optional.of(event));
         when(registrationRepository.findByUser_IdAndEvent_Id(1L, 10L))
@@ -197,8 +198,8 @@ class WaitlistServiceTest {
     @Test
     void rejectsJoiningADeletedEvent() {
         event.setStatus(EventStatus.OPEN);
-        event.setDeletedAt(LocalDateTime.now().minusMinutes(1));
-        event.setStartTime(LocalDateTime.now().plusHours(1));
+        event.setDeletedAt(LocalDateTime.now(clock).minusMinutes(1));
+        event.setStartTime(LocalDateTime.now(clock).plusHours(1));
         event.setCapacity(1);
         event.setRegisteredCount(1);
         event.setHeldCount(0);
@@ -262,7 +263,7 @@ class WaitlistServiceTest {
 
     private void prepareFullEventForJoin() {
         event.setStatus(EventStatus.OPEN);
-        event.setStartTime(LocalDateTime.now().plusDays(1));
+        event.setStartTime(LocalDateTime.now(clock).plusDays(1));
         event.setCapacity(1);
         event.setRegisteredCount(1);
         when(eventRepository.findByIdForUpdate(10L)).thenReturn(Optional.of(event));
