@@ -34,13 +34,12 @@ import static org.mockito.Mockito.*;
 
 @ExtendWith(MockitoExtension.class)
 class RegistrationServiceTest {
-    @Autowired private RegistrationRepository registrationRepository;
-    @Autowired private UserRepository userRepository;
-    @Autowired private EventRepository eventRepository;
-    @Autowired private EventOfferLifecycle eventOfferLifecycle;
-    @Autowired private AuditLogService auditLogService;
-    @Autowired private RegistrationTransactionService registrationTransactionService;
-    @Autowired private EntityManager entityManager;
+    @Mock private RegistrationRepository registrationRepository;
+    @Mock private UserRepository userRepository;
+    @Mock private EventRepository eventRepository;
+    @Mock private EventOfferLifecycle eventOfferLifecycle;
+    @Mock private AuditLogService auditLogService;
+    @Mock private RegistrationTransactionService registrationTransactionService;
 
     private Clock clock;
 
@@ -62,8 +61,7 @@ class RegistrationServiceTest {
                 eventOfferLifecycle,
                 auditLogService,
                 registrationTransactionService,
-                clock,
-                entityManager
+                clock
         );
 
         sampleUser = new User(
