@@ -225,6 +225,44 @@ class EventOwnershipIntegrationTest extends PostgresTestSupport {
     }
 
     @Test
+    void registrationHistorySurvivesReRegistrationAndIsPrivate() throws Exception {
+        EventResponse event = event(3);
+        User stranger = user("Stranger");
+        RegistrationResponse first = register(other, event);
+        register(stranger, event);
+        registrations.cancelRegistration(other.getId(), first.getId());
+        RegistrationResponse second = register(other, event);
+        assertEquals(first.getId(), second.getId());
+
+        mvc.perform(get("/api/me/registrations")).andExpect(status().isUnauthorized());
+        mvc.perform(get("/api/me/registrations").header("Authorization", token(other)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[0].id").value(first.getId()))
+                .andExpect(jsonPath("$[0].history.length()").value(3))
+                .andExpect(jsonPath("$[0].history[0].action").value("REGISTRATION_CONFIRM"))
+                .andExpect(jsonPath("$[0].history[0].previousStatus").value("NONE"))
+                .andExpect(jsonPath("$[0].history[1].action").value("REGISTRATION_CANCEL"))
+                .andExpect(jsonPath("$[0].history[2].previousStatus").value("CANCELLED"));
+        mvc.perform(get("/api/me/registrations").header("Authorization", token(stranger)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[0].history.length()").value(1));
+    }
+
+    @Test
+    void removedParticipantCanReadOwnHistoryWithoutOwnersAuditDetails() throws Exception {
+        EventResponse event = event(2);
+        RegistrationResponse registration = register(other, event);
+        events.removeParticipant(owner.getId(), event.getId(), registration.getId(), "Private removal reason");
+        mvc.perform(get("/api/me/registrations").header("Authorization", token(other)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[0].status").value("REMOVED"))
+                .andExpect(jsonPath("$[0].history[1].action").value("PARTICIPANT_REMOVE"))
+                .andExpect(jsonPath("$[0].history[1].newStatus").value("REMOVED"))
+                .andExpect(jsonPath("$[0].history[1].reason").doesNotExist())
+                .andExpect(jsonPath("$[0].history[1].details").doesNotExist());
+    }
+
+    @Test
     void ownerCanRemoveAParticipantAndRepeatingTheRequestDoesNotReleaseTwice() throws Exception {
         EventResponse event = event(2);
         RegistrationResponse registration = register(other, event);

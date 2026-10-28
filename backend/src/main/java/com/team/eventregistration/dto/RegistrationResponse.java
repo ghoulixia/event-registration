@@ -3,6 +3,7 @@ package com.team.eventregistration.dto;
 import com.team.eventregistration.entity.RegistrationStatus;
 
 import java.time.LocalDateTime;
+import java.util.List;
 
 public class RegistrationResponse {
     private Long id;
@@ -10,6 +11,7 @@ public class RegistrationResponse {
     private Long eventId;
     private String eventTitle;
     private LocalDateTime registeredAt;
+    private List<RegistrationHistoryResponse> history = List.of();
 
     public Long getId() {
         return id;
@@ -49,5 +51,13 @@ public class RegistrationResponse {
 
     public void setRegisteredAt(LocalDateTime registeredAt) {
         this.registeredAt = registeredAt;
+    }
+
+    public List<RegistrationHistoryResponse> getHistory() {
+        return history;
+    }
+
+    public void setHistory(List<RegistrationHistoryResponse> history) {
+        this.history = history;
     }
 }

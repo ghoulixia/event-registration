@@ -13,6 +13,17 @@ import java.util.List;
 
 public interface AuditLogRepository extends JpaRepository<AuditLog, Long> {
     List<AuditLog> findByTargetTypeAndTargetIdOrderByCreatedAtDescIdDesc(String targetType, Long targetId);
+    @Query(value = """
+            SELECT a.* FROM audit_logs a
+            JOIN registrations r ON r.event_id = a.target_id
+                AND (a.details ->> 'registration_id' = CAST(r.id AS text)
+                     OR a.details ->> 'registrationId' = CAST(r.id AS text))
+            WHERE r.user_id = :userId AND a.target_type = 'EVENT'
+                AND a.action IN ('REGISTRATION_CONFIRM', 'REGISTRATION_CANCEL', 'PARTICIPANT_REMOVE')
+            ORDER BY a.created_at ASC, a.id ASC
+            """, nativeQuery = true)
+    List<AuditLog> findRegistrationHistoryForUser(@Param("userId") Long userId);
+
 
     Page<AuditLog> findByTargetTypeAndTargetId(String targetType, Long targetId, Pageable pageable);
 
