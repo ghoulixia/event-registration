@@ -26,7 +26,7 @@ function App() {
           <Route path="/register" element={<RegisterPage />} />
           <Route
               path="/my-registrations"
-              element={<MyRegistrationsPage />}
+              element={<RequireSignIn><MyRegistrationsPage /></RequireSignIn>}
           />
           <Route path="/my-events" element={<RequireSignIn><MyEventsPage /></RequireSignIn>} />
           <Route path="/my-events/new" element={<RequireSignIn><EventFormPage /></RequireSignIn>} />
