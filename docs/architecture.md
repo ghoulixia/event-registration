@@ -8,14 +8,15 @@ flowchart TD
   Client --> Filter[JWT filter]
   Filter --> Controller
   Controller --> EventService
-  EventService --> EventStore[EventStore / UserStore]
-  EventStore --> Adapter[JPA adapters / repositories]
+  EventService --> EventRepository
+  EventService --> UserRepository
   EventService --> Participation[EventParticipationService]
   Participation --> RegistrationRepository
   Participation --> OfferContract[EventOfferLifecycle]
   EventService --> AuditLogService
   AuditLogService --> AuditLogRepository
-  Adapter --> PostgreSQL
+  EventRepository --> PostgreSQL
+  UserRepository --> PostgreSQL
   RegistrationRepository --> PostgreSQL
   AuditLogRepository --> PostgreSQL
 ```
@@ -23,10 +24,11 @@ flowchart TD
 ## Phân tầng
 
 Controller nhận HTTP/DTO, validate request và lấy principal. EventService kiểm tra quyền, thời gian,
-capacity và quản lý transaction. EventStore/PageResult dùng kiểu Java thuần; EventStoreAdapter chuyển
-sang Page/Sort và truy vấn JPA. UserStore tra tài khoản. Controller không gọi Repository; Service không
-import Spring Web, Spring Data hoặc Hibernate. Entity chứa mapping ORM; JPQL và nhận diện constraint DB
-nằm ở Repository.
+capacity và quản lý transaction. Service gọi EventRepository/UserRepository trực tiếp. Các phương thức
+phân trang ở EventRepository dựng PageRequest/Sort và chuyển kết quả sang DTO PageResult; JSON phân trang
+giữ nguyên. Controller không gọi Repository; Service không import Spring Web, Spring Data hoặc Hibernate.
+Entity chứa mapping ORM; JPQL và nhận diện constraint DB nằm ở Repository. DTO kiểm tra trường bắt buộc,
+độ dài và khoảng giá trị; Service kiểm tra quan hệ thời gian và quy tắc phụ thuộc dữ liệu hiện tại.
 
 ## Quyền và transaction
 
@@ -59,15 +61,18 @@ EventParticipationService đọc Registration và xử lý owner removal. EventO
 module Waitlist tham gia các transaction tăng capacity, đóng/mở/xóa và giải phóng chỗ. Provider xử lý
 các hook allocate/close/delete trong transaction caller.
 
-Main chưa có module Waitlist/SlotOffer nên hiện không có offer. Nếu heldCount > 0 mà thiếu provider,
-thao tác cần xử lý offer bị từ chối; sửa metadata không tác động offer vẫn được phép. Contract test dùng
-provider giả lập để kiểm tra hook và rollback. FIFO, accept/decline, scheduler và expiry được kiểm thử
-cùng module Waitlist khi tích hợp.
+EventOfferLifecycleAdapter nối contract với SlotOfferService. Khi giải phóng chỗ, hệ thống phân bổ
+cho những người WAITING đủ điều kiện theo FIFO đến khi hết chỗ hoặc hết người chờ. Người REMOVED bị
+chặn vào hàng chờ; các lượt chờ/offer cũ của người đã bị loại được kết thúc và nhường chỗ đúng transaction.
+Contract test dùng provider giả lập chỉ kiểm tra hook/rollback; integration test riêng kiểm tra hàng chờ,
+expiry và các trạng thái lưu trong PostgreSQL. Scheduler nền được mock trong integration tests để không
+tranh chấp fixture; unit test riêng kiểm tra scheduler gọi đúng service.
 
 ## Migration và baseline
 
 V1–V6 giữ nguyên từ GitHub, gồm V5 Audit/V6 USER role. V11 bổ sung owner/counter/TTL và REMOVED.
-V7–V10 thuộc nhánh Waitlist. Event cũ giữ owner NULL cho đến khi có mapping đã xác minh.
+V7–V10 tạo Waitlist/SlotOffer, V12 mở rộng action audit đăng ký. Event cũ giữ owner NULL cho đến khi có
+mapping đã xác minh. Các migration đã có được giữ nguyên.
 DB từng chạy migration thử nghiệm khác cần được sao lưu và có phương án chuyển đổi riêng; không sửa
 migration đã chạy hoặc repair để bỏ qua checksum. Xem hướng dẫn chạy và dữ liệu cũ trong README.
 

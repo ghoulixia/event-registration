@@ -51,7 +51,7 @@ GET /api/users/me trả profile. Frontend gọi /users/me sau khi nhận token �
 
 Title/organizerName bắt buộc, tối đa 255 ký tự; description có thể trống. City: HANOI/HCMC. Category:
 TECHNOLOGY/SPORTS/EDUCATION/MUSIC. capacity >= 1, endTime > startTime. Khi tạo, startTime phải ở tương lai.
-TTL trong khoảng 5–30 phút; POST mặc định 10, PUT yêu cầu cung cấp. PUT thay các trường chỉnh sửa, không chuyển owner.
+TTL trong khoảng 5–30 phút; POST mặc định 10 khi bỏ trường này, gửi null trả 400; PUT yêu cầu cung cấp. PUT thay các trường chỉnh sửa, không chuyển owner.
 PATCH nhận {"status":"CLOSED"}; DELETE và remove nhận {"reason":"Venue unavailable"}, lý do dài 1–1000 ký tự.
 Datetime Event là giờ địa phương Asia/Ho_Chi_Minh, không có hậu tố Z.
 
@@ -72,7 +72,7 @@ Các thao tác cập nhật lấy khóa Event trước khi kiểm tra thời gia
 Event đã bắt đầu không được thay startTime hoặc mở lại đăng ký. Trước giờ bắt đầu, startTime mới phải ở
 tương lai và không sớm hơn deadline pending do provider waitlist trả về. Đổi TTL giữ nguyên deadline đã cấp.
 
-Owner được tự đăng ký. Remove áp dụng cho registration CONFIRMED thuộc đúng Event, trước startTime và
+Owner không được tự đăng ký hoặc vào hàng chờ sự kiện của mình. Remove áp dụng cho registration CONFIRMED thuộc đúng Event, trước startTime và
 có lý do. Thao tác chuyển REMOVED, lưu người/thời điểm/lý do loại, giảm registeredCount và gọi handover
 hook nếu có. Retry trước startTime với registration đã REMOVED trả 204, không giảm count hoặc ghi audit
 lần nữa. Người REMOVED bị từ chối đăng ký lại bằng 409. Người dùng được hủy registration của mình trước
@@ -84,20 +84,31 @@ owner được xem công khai, chưa được quản lý cho đến khi xác min
 
 ## Tích hợp Waitlist
 
-Main chưa có module Waitlist/SlotOffer. offerTtlMinutes được kiểm tra trong khoảng 5–30 phút và lưu vào Event; owner waitlist
-view hiện rỗng. EventOfferLifecycle nhận Event đã khóa và now, chạy trong transaction của thao tác Event:
+Module Waitlist/SlotOffer đã được tích hợp qua EventOfferLifecycleAdapter. Các API sau yêu cầu JWT:
 
-- allocateAvailable: tăng capacity, mở lại hoặc remove giải phóng chỗ;
-- close: Event đã được đặt CLOSED;
-- delete: Event đã có deletedAt và CLOSED;
-- latestPendingExpiry, waitingCount, waitingList: đọc trạng thái liên quan.
+| Method | Path | Input | Thành công |
+|---|---|---|---|
+| POST | /api/events/{id}/waitlist | không cần body | 200 WaitlistEntryResponse |
+| DELETE | /api/events/{id}/waitlist/me | — | 204 |
+| GET | /api/me/waitlist | — | 200 MyWaitlistResponse |
+| POST | /api/offers/{id}/accept | không cần body | 204 |
+| POST | /api/offers/{id}/decline | không cần body | 204 |
 
-Provider của module Waitlist thực hiện FIFO, revoke/restore, expiry và deadline. Provider không mở
-REQUIRES_NEW khi caller đang giữ khóa Event. Lỗi provider làm rollback Event, registration và audit.
-Nếu heldCount > 0 mà thiếu provider, thao tác cần xử lý offer trả 409; sửa metadata không tác động offer
-vẫn được phép. Main chưa có queue nên heldCount = 0 và Event CRUD/remove hoạt động bình thường.
-Contract test dùng provider giả lập để kiểm tra việc gọi hook và rollback. FIFO, accept/decline, expiry
-và scheduler cần được kiểm thử khi tích hợp module Waitlist.
+MyWaitlistResponse gồm entries và serverNow. Chỉ trả lượt WAITING/OFFERED; entry WAITING có position và
+không có offer, entry OFFERED có offer chứa id/status/expiresAt. Người gọi chỉ được phản hồi offer của mình;
+offer không thuộc tài khoản trả 404.
+
+Người REMOVED không được vào hàng chờ. Khi gặp dữ liệu chờ cũ của người đã bị loại, bộ phân bổ kết thúc
+lượt không hợp lệ và tiếp tục FIFO. Nếu offer cũ đã được cấp trước đó, accept trả 409 nhưng vẫn commit
+việc thu hồi offer, trả chỗ và phân bổ lại cho người đủ điều kiện.
+
+TTL cấu hình 5–30 phút; hạn thực tế không vượt startTime. Quá hạn hoặc từ chối sẽ phân bổ tất cả chỗ còn
+trống cho người chờ đủ điều kiện. Scheduler mặc định nghỉ 60 giây sau khi lần chạy trước hoàn tất,
+không bảo đảm xử lý đúng ngay giây hết hạn; accept luôn kiểm tra thời hạn tại backend.
+
+EventOfferLifecycle nhận Event đã khóa và now, tham gia transaction của thao tác tăng capacity,
+đóng/mở/xóa Event hoặc loại participant. Lỗi phải rollback thay đổi nghiệp vụ và audit tương ứng.
+Các API accept/decline xử lý kết quả hết hạn/thu hồi theo transaction của SlotOfferService.
 
 ## Thumbnail và audit
 
@@ -110,7 +121,8 @@ AuditLogService dùng bảng audit_logs từ V5, ghi details trước/sau thay �
 EVENT_CREATE/UPDATE/OPEN/CLOSE/DELETE và PARTICIPANT_REMOVE trong cùng transaction Event.
 AuditResponse gồm id, action, reason, createdAt, actorUserId, actorName, details. createdAt là Instant UTC.
 Remove lưu registrationId, userId và trạng thái trước/sau trong details; target vẫn là Event.
-Nhật ký xác nhận/hủy đăng ký cần được bổ sung ở module Registration và Audit.
+REGISTRATION_CONFIRM/REGISTRATION_CANCEL được ghi ở module Registration/Offers. GET /api/me/registrations
+trả lịch sử của người gọi; GET /api/events/{id}/audit-logs chỉ cho owner đọc nhật ký Event.
 
 Mã lỗi: 400 input/parameter; 401 chưa xác thực; 403 không phải owner; 404 không tồn tại/đã ẩn;
 409 xung đột nghiệp vụ; 500 lỗi ngoài dự kiến. Lỗi Auth dùng code/message/traceId; lỗi Event dùng

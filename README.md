@@ -22,7 +22,7 @@ Người dùng đăng ký tài khoản, đăng nhập để nhận JWT. Các tha
 
 Người tạo nhập tên, đơn vị tổ chức, thành phố, danh mục, thời gian và sức chứa; có thể thêm mô tả, ảnh và cấu hình thời gian nhận lời mời. Khách tìm sự kiện, xem số chỗ còn lại. Khi còn chỗ, đăng ký được xác nhận ngay; không cho đăng ký trùng hay vượt sức chứa. Khi chủ sự kiện giảm sức chứa, hệ thống không cho giảm xuống dưới số chỗ đã xác nhận hoặc đang giữ cho lời mời.
 
-Người tham gia có thể hủy trước giờ bắt đầu. Chủ sự kiện có thể loại người tham gia trước giờ bắt đầu nhưng phải ghi lý do. Bản ghi cũ được giữ lại để xem lịch sử; xóa sự kiện cũng là xóa mềm, không xóa mất nhật ký.
+Người tham gia có thể hủy trước giờ bắt đầu. Chủ sự kiện có thể loại người tham gia trước giờ bắt đầu nhưng phải ghi lý do. Người bị loại không được tự đăng ký hoặc vào hàng chờ lại sự kiện đó. Bản ghi cũ được giữ lại để xem lịch sử; xóa sự kiện cũng là xóa mềm, không xóa mất nhật ký.
 
 ### 2.2. Hàng chờ và lời mời có hạn
 
@@ -89,4 +89,4 @@ Mở địa chỉ Vite in ra terminal (thường là http://localhost:5173); fro
 
 - [Đặc tả OpenAPI độc lập](specs/openapi.yaml) để xem trước; khi backend chạy: [Swagger UI](http://localhost:8080/swagger-ui/index.html) và [OpenAPI JSON](http://localhost:8080/v3/api-docs).
 - [Hợp đồng API và ghi chú nghiệp vụ](docs/api-contract.md), [kiến trúc](docs/architecture.md).
-- Kiểm tra frontend: trong `frontend/` chạy `npm run build`, `npm run lint`. Kiểm tra backend: trong `backend/` chạy `.\mvnw.cmd test`. Phần lớn kiểm thử database dùng Testcontainers; một lớp test còn kết nối `localhost:5433`, vì vậy **dùng database thử nghiệm riêng ở cổng này, không chạy toàn bộ test trên dữ liệu demo**.
+- Kiểm tra frontend: trong `frontend/` chạy `npm run build`, `npm run lint`. Kiểm tra backend: trong `backend/` chạy `.\mvnw.cmd test`. Các integration test dùng PostgreSQL 16 Testcontainers và thư mục upload thử nghiệm trong `target`; cần Docker đang hoạt động. Test không dùng datasource của DB phát triển. Scheduler nền được mock trong integration tests; các kịch bản expiry gọi service với thời điểm xác định.
