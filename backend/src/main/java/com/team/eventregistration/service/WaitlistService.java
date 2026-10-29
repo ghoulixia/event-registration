@@ -70,10 +70,13 @@ public class WaitlistService {
         if (event.getRegisteredCount() + event.getHeldCount() < event.getCapacity()) {
             throw new BusinessRuleException("The event still has available capacity.");
         }
-        if (registrationRepository.findByUser_IdAndEvent_Id(userId, eventId)
-                .filter(registration -> registration.getStatus() == RegistrationStatus.CONFIRMED)
-                .isPresent()) {
+        Registration registration = registrationRepository.findByUser_IdAndEvent_Id(userId, eventId)
+                .orElse(null);
+        if (registration != null && registration.getStatus() == RegistrationStatus.CONFIRMED) {
             throw new BusinessRuleException("A confirmed registration already exists for this event.");
+        }
+        if (registration != null && registration.getStatus() == RegistrationStatus.REMOVED) {
+            throw new BusinessRuleException("Removed participants cannot join the waitlist for this event.");
         }
         if (waitlistEntryRepository.findByUser_IdAndEvent_IdAndStatusIn(
                 userId,

@@ -62,7 +62,12 @@ public class SlotOfferService {
             return Optional.empty();
         }
 
-        return offerNextWaitingEntry(event, now);
+        int releasedCount = revokeRemovedParticipantOffers(event, now) + expirePendingOffers(event, now);
+        Optional<SlotOffer> nextOffer = offerNextWaitingEntry(event, now);
+        if (releasedCount > 0) {
+            allocateAvailableSlotsToWaitlist(event, now);
+        }
+        return nextOffer;
     }
 
     @Transactional
@@ -88,6 +93,9 @@ public class SlotOfferService {
             return;
         }
 
+        revokeRemovedParticipantOffers(event, at);
+        expirePendingOffers(event, at);
+        validateCounters(event);
         while (availableSlots(event) > 0) {
             Optional<SlotOffer> offer = offerNextWaitingEntry(event, at);
             if (offer.isEmpty()) {
@@ -179,17 +187,19 @@ public class SlotOfferService {
             throw new BusinessRuleException(
                     "Slot offer is not associated with an offered waitlist entry.");
         }
-        if (!now.isBefore(offer.getExpiresAt())) {
-            expireOffer(offer, now);
-            if (isOpenAndUpcoming(event, now)) {
-                offerNextWaitingEntry(event, now);
-            }
-            throw outcomeException(offer);
-        }
-
         Registration registration = registrationRepository
                 .findByUser_IdAndEvent_Id(userId, event.getId())
                 .orElse(null);
+        if (registration != null && registration.getStatus() == RegistrationStatus.REMOVED) {
+            revokeOffer(offer, now);
+            allocateAvailableSlotsToWaitlist(event, now);
+            throw outcomeException(offer);
+        }
+        if (!now.isBefore(offer.getExpiresAt())) {
+            expireOffer(offer, now);
+            allocateAvailableSlotsToWaitlist(event, now);
+            throw outcomeException(offer);
+        }
         if (registration != null && registration.getStatus() == RegistrationStatus.CONFIRMED) {
             throw new BusinessRuleException(
                     "User already has a confirmed registration for this event.");
@@ -262,9 +272,7 @@ public class SlotOfferService {
 
         if (!now.isBefore(offer.getExpiresAt())) {
             expireOffer(offer, now);
-            if (isOpenAndUpcoming(event, now)) {
-                offerNextWaitingEntry(event, now);
-            }
+            allocateAvailableSlotsToWaitlist(event, now);
             throw outcomeException(offer);
         } else {
             entry.leave(now);
@@ -275,9 +283,7 @@ public class SlotOfferService {
             slotOfferRepository.save(offer);
         }
 
-        if (isOpenAndUpcoming(event, now)) {
-            offerNextWaitingEntry(event, now);
-        }
+        allocateAvailableSlotsToWaitlist(event, now);
     }
 
     @Transactional
@@ -305,9 +311,7 @@ public class SlotOfferService {
             slotOfferRepository.save(offer);
         }
 
-        if (isOpenAndUpcoming(event, at)) {
-            offerNextWaitingEntry(event, at);
-        }
+        allocateAvailableSlotsToWaitlist(event, at);
     }
 
     @Transactional
@@ -368,7 +372,7 @@ public class SlotOfferService {
 
         int newlyExpired = expirePendingOffers(event, at);
         if (newlyExpired > 0) {
-            offerNextWaitingEntry(event, at);
+            allocateAvailableSlotsToWaitlist(event, at);
         }
         return newlyExpired;
     }
@@ -446,7 +450,6 @@ public class SlotOfferService {
 
     private Optional<SlotOffer> offerNextWaitingEntry(Event event, LocalDateTime at) {
         validateOpenEvent(event, at, "offer a slot");
-        expirePendingOffers(event, at);
         validateCounters(event);
 
         if (availableSlots(event) <= 0) {
@@ -460,6 +463,12 @@ public class SlotOfferService {
             Long userId = entry.getUser().getId();
             Long eventId = event.getId();
 
+            if (registrationRepository.existsByUser_IdAndEvent_IdAndStatus(
+                    userId, eventId, RegistrationStatus.REMOVED)) {
+                entry.cancel();
+                waitlistEntryRepository.save(entry);
+                continue;
+            }
             if (registrationRepository.existsByUser_IdAndEvent_IdAndStatus(
                     userId, eventId, RegistrationStatus.CONFIRMED)) {
                 continue;
@@ -486,6 +495,19 @@ public class SlotOfferService {
             return Optional.of(slotOfferRepository.save(offer));
         }
         return Optional.empty();
+    }
+
+    private int revokeRemovedParticipantOffers(Event event, LocalDateTime at) {
+        int revokedCount = 0;
+        for (SlotOffer offer : slotOfferRepository.findByEvent_IdAndStatus(
+                event.getId(), SlotOfferStatus.PENDING)) {
+            if (registrationRepository.existsByUser_IdAndEvent_IdAndStatus(
+                    offer.getUser().getId(), event.getId(), RegistrationStatus.REMOVED)) {
+                revokeOffer(offer, at);
+                revokedCount++;
+            }
+        }
+        return revokedCount;
     }
 
     private int expirePendingOffers(Event event, LocalDateTime at) {

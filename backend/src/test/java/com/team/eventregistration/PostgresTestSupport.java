@@ -1,10 +1,15 @@
 package com.team.eventregistration;
 
+import com.team.eventregistration.service.SlotOfferScheduler;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
+import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.testcontainers.postgresql.PostgreSQLContainer;
 
 public abstract class PostgresTestSupport {
+    @MockitoBean
+    protected SlotOfferScheduler slotOfferScheduler;
+
     protected static final PostgreSQLContainer POSTGRES = new PostgreSQLContainer("postgres:16-alpine");
     static { POSTGRES.start(); }
 
