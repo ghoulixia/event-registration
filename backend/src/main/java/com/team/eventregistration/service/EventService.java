@@ -3,6 +3,8 @@ package com.team.eventregistration.service;
 import com.team.eventregistration.dto.*;
 import com.team.eventregistration.entity.*;
 import com.team.eventregistration.exception.*;
+import com.team.eventregistration.repository.EventRepository;
+import com.team.eventregistration.repository.UserRepository;
 import com.team.eventregistration.service.port.*;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.security.access.AccessDeniedException;
@@ -18,15 +20,15 @@ import java.util.*;
 
 @Service
 public class EventService {
-    private final EventStore events;
-    private final UserStore users;
+    private final EventRepository events;
+    private final UserRepository users;
     private final ImageStorageService images;
     private final EventParticipation participation;
     private final AuditLogService audits;
     private final Clock clock;
     private final String thumbnailBaseUrl;
 
-    public EventService(EventStore events, UserStore users, ImageStorageService images,
+    public EventService(EventRepository events, UserRepository users, ImageStorageService images,
                         EventParticipation participation, AuditLogService audits, Clock clock,
                         @Value("${app.upload.base-url:/api/uploads/thumbnails/}") String thumbnailBaseUrl) {
         this.events = events;
@@ -49,14 +51,14 @@ public class EventService {
 
     @Transactional(readOnly = true, isolation = Isolation.REPEATABLE_READ)
     public EventResponse getEventDetail(Long eventId) {
-        Event event = events.find(eventId).filter(e -> e.getDeletedAt() == null)
+        Event event = events.findById(eventId).filter(e -> e.getDeletedAt() == null)
                 .orElseThrow(() -> new ResourceNotFoundException("Event not found."));
         return toResponse(event);
     }
 
     @Transactional(readOnly = true, isolation = Isolation.REPEATABLE_READ)
     public EventResponse getOwnedEvent(Long actorId, Long eventId) {
-        Event event = events.find(eventId).orElseThrow(() -> new ResourceNotFoundException("Event not found."));
+        Event event = events.findById(eventId).orElseThrow(() -> new ResourceNotFoundException("Event not found."));
         requireOwner(actorId, event);
         return toResponse(event);
     }
@@ -72,15 +74,13 @@ public class EventService {
     public EventResponse createEvent(Long actorId, CreateEventRequest request) {
         requireUser(actorId);
         LocalDateTime now = now();
-        validateDetails(request.getTitle(), request.getOrganizerName(), request.getStartTime(),
-                request.getEndTime(), request.getCapacity(), request.getOfferTtlMinutes());
+        validateTimeRange(request.getStartTime(), request.getEndTime());
         if (!request.getStartTime().isAfter(now)) {
             throw new EventConflictException("Start time must be in the future.");
         }
         Event event = new Event();
         event.setOrganizerUserId(actorId);
-        apply(event, request.getTitle(), request.getDescription(), request.getOrganizerName(), request.getCity(),
-                request.getCategory(), request.getStartTime(), request.getEndTime(), request.getCapacity(), request.getOfferTtlMinutes());
+        apply(event, request);
         event.setStatus(EventStatus.OPEN);
         event.setRegisteredCount(0);
         event.setHeldCount(0);
@@ -96,8 +96,7 @@ public class EventService {
     public EventResponse updateEvent(Long actorId, Long eventId, UpdateEventRequest request) {
         Event event = lockOwned(actorId, eventId, false);
         LocalDateTime now = now();
-        validateDetails(request.getTitle(), request.getOrganizerName(), request.getStartTime(),
-                request.getEndTime(), request.getCapacity(), request.getOfferTtlMinutes());
+        validateTimeRange(request.getStartTime(), request.getEndTime());
         if (!request.getStartTime().equals(event.getStartTime())) {
             if (!now.isBefore(event.getStartTime())) {
                 throw new EventConflictException("A started event cannot change its start time.");
@@ -116,8 +115,7 @@ public class EventService {
         }
         Map<String, Object> before = snapshot(event);
         int oldCapacity = event.getCapacity();
-        apply(event, request.getTitle(), request.getDescription(), request.getOrganizerName(), request.getCity(),
-                request.getCategory(), request.getStartTime(), request.getEndTime(), request.getCapacity(), request.getOfferTtlMinutes());
+        apply(event, request);
         event.setUpdatedAt(now);
         if (event.getCapacity() > oldCapacity) {
             participation.afterCapacityIncrease(event, now);
@@ -174,43 +172,33 @@ public class EventService {
     @Transactional
     public EventResponse uploadThumbnail(Long actorId, Long eventId, InputStream input,
                                          String originalName, String contentType, long size) {
+        if (!TransactionSynchronizationManager.isSynchronizationActive()) {
+            throw new IllegalStateException("Thumbnail updates require an active transaction.");
+        }
         Event event = lockOwned(actorId, eventId, false);
         String previous = event.getThumbnailPath();
         String stored = images.store(input, originalName, contentType, size);
-        boolean synchronizedTransaction = TransactionSynchronizationManager.isSynchronizationActive();
-        if (synchronizedTransaction) {
-            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
-                @Override
-                public void afterCommit() {
-                    images.delete(previous);
-                }
-
-                @Override
-                public void afterCompletion(int status) {
-                    if (status != STATUS_COMMITTED) {
-                        images.delete(stored);
-                    }
-                }
-            });
-        }
-        try {
-            event.setThumbnailPath(stored);
-            event.setUpdatedAt(now());
-            events.save(event);
-            Map<String, Object> detail = new LinkedHashMap<>();
-            detail.put("beforeThumbnail", previous);
-            detail.put("afterThumbnail", stored);
-            audits.recordEventAction(eventId, actorId, "EVENT_UPDATE", null, detail);
-            if (!synchronizedTransaction) {
+        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+            @Override
+            public void afterCommit() {
                 images.delete(previous);
             }
-            return toResponse(event);
-        } catch (RuntimeException exception) {
-            if (!synchronizedTransaction) {
-                images.delete(stored);
+
+            @Override
+            public void afterCompletion(int status) {
+                if (status != STATUS_COMMITTED) {
+                    images.delete(stored);
+                }
             }
-            throw exception;
-        }
+        });
+        event.setThumbnailPath(stored);
+        event.setUpdatedAt(now());
+        events.save(event);
+        Map<String, Object> detail = new LinkedHashMap<>();
+        detail.put("beforeThumbnail", previous);
+        detail.put("afterThumbnail", stored);
+        audits.recordEventAction(eventId, actorId, "EVENT_UPDATE", null, detail);
+        return toResponse(event);
     }
 
     @Transactional(readOnly = true)
@@ -248,12 +236,12 @@ public class EventService {
     }
 
     private Event requireOwned(Long actorId, Long eventId) {
-        Event event = events.find(eventId).orElseThrow(() -> new ResourceNotFoundException("Event not found."));
+        Event event = events.findById(eventId).orElseThrow(() -> new ResourceNotFoundException("Event not found."));
         requireOwner(actorId, event);
         return event;
     }
     private Event lockOwned(Long actorId, Long eventId, boolean includeDeleted) {
-        Event event = events.lock(eventId).orElseThrow(() -> new ResourceNotFoundException("Event not found."));
+        Event event = events.findByIdForUpdate(eventId).orElseThrow(() -> new ResourceNotFoundException("Event not found."));
         requireOwner(actorId, event);
         if (!includeDeleted && event.getDeletedAt() != null) {
             throw new ResourceNotFoundException("Event not found.");
@@ -267,7 +255,7 @@ public class EventService {
         }
     }
     private void requireUser(Long actorId) {
-        if (actorId == null || users.find(actorId).isEmpty()) {
+        if (actorId == null || users.findById(actorId).isEmpty()) {
             throw new AccessDeniedException("A valid user is required.");
         }
     }
@@ -281,25 +269,36 @@ public class EventService {
             throw new IllegalArgumentException("Page must be nonnegative and size positive.");
         }
     }
-    private void validateDetails(String title, String organizer, LocalDateTime start, LocalDateTime end, Integer capacity, Integer ttl) {
-        if (title == null || title.isBlank() || title.length() > 255 || organizer == null || organizer.isBlank() || organizer.length() > 255
-                || start == null || end == null || !end.isAfter(start) || capacity == null || capacity < 1
-                || ttl == null || ttl < 5 || ttl > 30) {
-            throw new IllegalArgumentException("Invalid event details, time range, capacity or offer TTL.");
+    private void validateTimeRange(LocalDateTime start, LocalDateTime end) {
+        if (!end.isAfter(start)) {
+            throw new IllegalArgumentException("Event end time must be after start time.");
         }
     }
-    private void apply(Event event, String title, String description, String organizer, String city, String category,
-                       LocalDateTime start, LocalDateTime end, int capacity, int ttl) {
-        event.setTitle(title.trim());
-        event.setDescription(description);
-        event.setOrganizerName(organizer.trim());
-        event.setCity(requiredEnum(City.class, city, "City"));
-        event.setCategory(requiredEnum(Category.class, category, "Category"));
-        event.setStartTime(start);
-        event.setEndTime(end);
-        event.setCapacity(capacity);
-        event.setOfferTtlMinutes(ttl);
+
+    private void apply(Event event, CreateEventRequest request) {
+        event.setTitle(request.getTitle().trim());
+        event.setDescription(request.getDescription());
+        event.setOrganizerName(request.getOrganizerName().trim());
+        event.setCity(requiredEnum(City.class, request.getCity(), "City"));
+        event.setCategory(requiredEnum(Category.class, request.getCategory(), "Category"));
+        event.setStartTime(request.getStartTime());
+        event.setEndTime(request.getEndTime());
+        event.setCapacity(request.getCapacity());
+        event.setOfferTtlMinutes(request.getOfferTtlMinutes());
     }
+
+    private void apply(Event event, UpdateEventRequest request) {
+        event.setTitle(request.getTitle().trim());
+        event.setDescription(request.getDescription());
+        event.setOrganizerName(request.getOrganizerName().trim());
+        event.setCity(requiredEnum(City.class, request.getCity(), "City"));
+        event.setCategory(requiredEnum(Category.class, request.getCategory(), "Category"));
+        event.setStartTime(request.getStartTime());
+        event.setEndTime(request.getEndTime());
+        event.setCapacity(request.getCapacity());
+        event.setOfferTtlMinutes(request.getOfferTtlMinutes());
+    }
+
     private Map<String, Object> snapshot(Event event) {
         Map<String, Object> data = new LinkedHashMap<>();
         data.put("title", event.getTitle());

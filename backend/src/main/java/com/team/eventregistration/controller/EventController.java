@@ -2,11 +2,11 @@ package com.team.eventregistration.controller;
 
 import com.team.eventregistration.dto.EventResponse;
 import com.team.eventregistration.dto.EventSearchRequest;
+import com.team.eventregistration.dto.PageResult;
 import com.team.eventregistration.service.EventService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.responses.ApiResponse;
 import io.swagger.v3.oas.annotations.tags.Tag;
-import com.team.eventregistration.service.port.PageResult;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.ModelAttribute;

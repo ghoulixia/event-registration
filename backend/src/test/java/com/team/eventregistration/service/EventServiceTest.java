@@ -3,11 +3,15 @@ package com.team.eventregistration.service;
 import com.team.eventregistration.dto.CreateEventRequest;
 import com.team.eventregistration.dto.EventResponse;
 import com.team.eventregistration.dto.ParticipantRemoval;
+import com.team.eventregistration.dto.PageResult;
 import com.team.eventregistration.dto.UpdateEventRequest;
 import com.team.eventregistration.entity.*;
 import com.team.eventregistration.exception.EventConflictException;
 import com.team.eventregistration.exception.ResourceNotFoundException;
+import com.team.eventregistration.repository.EventRepository;
+import com.team.eventregistration.repository.UserRepository;
 import com.team.eventregistration.service.port.*;
+import jakarta.validation.Validation;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -15,17 +19,19 @@ import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.security.access.AccessDeniedException;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 import java.io.ByteArrayInputStream;
 import java.time.*;
 import java.util.*;
+import java.util.stream.Collectors;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.*;
 import static org.mockito.Mockito.*;
 
 @ExtendWith(MockitoExtension.class)
 class EventServiceTest {
-    @Mock EventStore events;
-    @Mock UserStore users;
+    @Mock EventRepository events;
+    @Mock UserRepository users;
     @Mock ImageStorageService images;
     @Mock EventParticipation participation;
     @Mock AuditLogService audit;
@@ -53,10 +59,10 @@ class EventServiceTest {
         owner.setId(42L);
         User other = new User("other@example.com", "Other", "hash", null, Role.USER);
         other.setId(7L);
-        lenient().when(users.find(42L)).thenReturn(Optional.of(owner));
-        lenient().when(users.find(7L)).thenReturn(Optional.of(other));
-        lenient().when(events.find(1L)).thenReturn(Optional.of(event));
-        lenient().when(events.lock(1L)).thenReturn(Optional.of(event));
+        lenient().when(users.findById(42L)).thenReturn(Optional.of(owner));
+        lenient().when(users.findById(7L)).thenReturn(Optional.of(other));
+        lenient().when(events.findById(1L)).thenReturn(Optional.of(event));
+        lenient().when(events.findByIdForUpdate(1L)).thenReturn(Optional.of(event));
         lenient().when(events.save(any())).thenAnswer(invocation -> {
             Event saved = invocation.getArgument(0);
             if (saved.getId() == null) saved.setId(10L);
@@ -130,13 +136,28 @@ class EventServiceTest {
     }
 
     @Test
-    void eventValidationRejectsTtlOutsideTheConfiguredRange() {
-        for (int ttl : new int[]{4, 31}) {
-            CreateEventRequest request = create();
-            request.setOfferTtlMinutes(ttl);
-            assertThrows(IllegalArgumentException.class, () -> service.createEvent(42L, request));
+    void requestValidationEnforcesTtlRangeAndNullability() {
+        try (var factory = Validation.buildDefaultValidatorFactory()) {
+            var validator = factory.getValidator();
+            for (Integer ttl : new Integer[]{null, 4, 31}) {
+                CreateEventRequest create = create();
+                create.setOfferTtlMinutes(ttl);
+                UpdateEventRequest update = update();
+                update.setOfferTtlMinutes(ttl);
+                assertEquals(Set.of("offerTtlMinutes"), validator.validate(create).stream()
+                        .map(violation -> violation.getPropertyPath().toString()).collect(Collectors.toSet()));
+                assertEquals(Set.of("offerTtlMinutes"), validator.validate(update).stream()
+                        .map(violation -> violation.getPropertyPath().toString()).collect(Collectors.toSet()));
+            }
+            for (int ttl : new int[]{5, 30}) {
+                CreateEventRequest create = create();
+                create.setOfferTtlMinutes(ttl);
+                UpdateEventRequest update = update();
+                update.setOfferTtlMinutes(ttl);
+                assertTrue(validator.validate(create).isEmpty());
+                assertTrue(validator.validate(update).isEmpty());
+            }
         }
-        verify(events, never()).save(any());
     }
 
     @Test
@@ -147,8 +168,9 @@ class EventServiceTest {
         assertThrows(AccessDeniedException.class, () -> service.updateEvent(7L, 1L, update()));
         assertThrows(AccessDeniedException.class, () -> service.updateStatus(7L, 1L, "CLOSED"));
         assertThrows(AccessDeniedException.class, () -> service.softDeleteEvent(7L, 1L, "Reason"));
-        assertThrows(AccessDeniedException.class, () -> service.uploadThumbnail(7L, 1L,
-                new ByteArrayInputStream(new byte[]{1}), "new.png", "image/png", 1));
+        withTransactionSynchronization(() -> assertThrows(AccessDeniedException.class,
+                () -> service.uploadThumbnail(7L, 1L,
+                        new ByteArrayInputStream(new byte[]{1}), "new.png", "image/png", 1)));
         verifyNoInteractions(images, participation, audit);
     }
 
@@ -182,7 +204,7 @@ class EventServiceTest {
         request.setCapacity(120);
         service.updateEvent(42L, 1L, request);
         var order = inOrder(events, participation, audit);
-        order.verify(events).lock(1L);
+        order.verify(events).findByIdForUpdate(1L);
         order.verify(participation).afterCapacityIncrease(event, now());
         order.verify(events).save(event);
         order.verify(audit).recordEventAction(eq(1L), eq(42L), eq("EVENT_UPDATE"), isNull(), anyMap());
@@ -225,7 +247,7 @@ class EventServiceTest {
                 advancing, "/api/uploads/thumbnails/");
         event.setStatus(EventStatus.CLOSED);
         event.setStartTime(LocalDateTime.now(advancing).plusSeconds(1));
-        when(events.lock(1L)).thenAnswer(invocation -> {
+        when(events.findByIdForUpdate(1L)).thenAnswer(invocation -> {
             advancing.advance(Duration.ofSeconds(1));
             return Optional.of(event);
         });
@@ -292,20 +314,43 @@ class EventServiceTest {
     @Test
     void failedStorageLeavesThePreviousThumbnailUntouched() {
         when(images.store(any(), anyString(), anyString(), anyLong())).thenThrow(new IllegalStateException("Storage unavailable"));
-        assertThrows(IllegalStateException.class, () -> service.uploadThumbnail(42L, 1L,
-                new ByteArrayInputStream(new byte[]{1}), "new.png", "image/png", 1));
+        withTransactionSynchronization(() -> {
+            IllegalStateException failure = assertThrows(IllegalStateException.class,
+                    () -> service.uploadThumbnail(42L, 1L,
+                            new ByteArrayInputStream(new byte[]{1}), "new.png", "image/png", 1));
+            assertEquals("Storage unavailable", failure.getMessage());
+        });
         assertEquals("old.png", event.getThumbnailPath());
+        verify(images).store(any(), eq("new.png"), eq("image/png"), eq(1L));
         verify(images, never()).delete("old.png");
     }
 
     @Test
-    void paginationUsesTheDataPortAndCapsPageSize() {
+    void thumbnailUploadRequiresATransactionBeforeLockingOrWritingAFile() {
+        assertThrows(IllegalStateException.class, () -> service.uploadThumbnail(42L, 1L,
+                new ByteArrayInputStream(new byte[]{1}), "new.png", "image/png", 1));
+        verify(events, never()).findByIdForUpdate(anyLong());
+        verifyNoInteractions(images, participation, audit);
+        assertEquals("old.png", event.getThumbnailPath());
+    }
+
+    @Test
+    void paginationUsesTheRepositoryAndCapsPageSize() {
         when(events.search(eq("work"), eq(City.HANOI), eq(Category.EDUCATION), eq(0), eq(50), eq("startTime")))
                 .thenReturn(new PageResult<>(List.of(event), 1, 0, 50));
         var result = service.filterEvents(" work ", "HANOI", "EDUCATION", 0, 1000, "startTime");
         assertEquals(1, result.totalElements());
         assertEquals(50, result.size());
         assertEquals(1L, result.content().getFirst().getId());
+    }
+
+    void withTransactionSynchronization(Runnable action) {
+        TransactionSynchronizationManager.initSynchronization();
+        try {
+            action.run();
+        } finally {
+            TransactionSynchronizationManager.clearSynchronization();
+        }
     }
 
     static class MutableClock extends Clock {

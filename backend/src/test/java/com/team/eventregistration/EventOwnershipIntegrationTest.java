@@ -87,6 +87,14 @@ class EventOwnershipIntegrationTest extends PostgresTestSupport {
     String token(User user) { return "Bearer " + jwt.issue(user.getId()); }
     String path(EventResponse event) { return "/api/events/" + event.getId(); }
 
+    String createJson(String ttlProperty) {
+        return """
+                {"title":"API event %s","organizerName":"Community","city":"HANOI",
+                 "category":"MUSIC","startTime":"%s","endTime":"%s","capacity":2%s}
+                """.formatted(UUID.randomUUID(), LocalDateTime.now(clock).plusDays(1),
+                LocalDateTime.now(clock).plusDays(1).plusHours(3), ttlProperty);
+    }
+
     UpdateEventRequest update(EventResponse event) {
         UpdateEventRequest request = new UpdateEventRequest();
         request.setTitle("Updated title");
@@ -150,6 +158,65 @@ class EventOwnershipIntegrationTest extends PostgresTestSupport {
     }
 
     @Test
+    void creationRejectsAnExplicitlyNullTtlBeforePersistingAnEvent() throws Exception {
+        mvc.perform(post("/api/events").header("Authorization", token(owner))
+                .contentType("application/json").content(createJson(",\"offerTtlMinutes\":null")))
+                .andExpect(status().isBadRequest());
+        assertEquals(0, events.myEvents(owner.getId(), 0, 12).totalElements());
+    }
+
+    @Test
+    void creationDefaultsAnOmittedTtlToTenMinutes() throws Exception {
+        mvc.perform(post("/api/events").header("Authorization", token(owner))
+                .contentType("application/json").content(createJson("")))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.organizerUserId").value(owner.getId()))
+                .andExpect(jsonPath("$.offerTtlMinutes").value(10));
+        var owned = events.myEvents(owner.getId(), 0, 12);
+        assertEquals(1, owned.totalElements());
+        assertEquals(10, eventRepository.findById(owned.content().getFirst().getId())
+                .orElseThrow().getOfferTtlMinutes());
+    }
+
+    @Test
+    void publicEventPaginationKeepsItsFlatJsonContract() throws Exception {
+        String keyword = UUID.randomUUID().toString();
+        CreateEventRequest firstRequest = request(2);
+        firstRequest.setTitle(keyword + " first");
+        EventResponse first = events.createEvent(owner.getId(), firstRequest);
+        CreateEventRequest secondRequest = request(2);
+        secondRequest.setTitle(keyword + " second");
+        secondRequest.setStartTime(firstRequest.getStartTime().plusHours(1));
+        secondRequest.setEndTime(firstRequest.getEndTime().plusHours(1));
+        EventResponse second = events.createEvent(owner.getId(), secondRequest);
+
+        mvc.perform(get("/api/events").param("keyword", keyword).param("size", "1"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.content.length()").value(1))
+                .andExpect(jsonPath("$.content[0].id").value(first.getId()))
+                .andExpect(jsonPath("$.totalElements").value(2))
+                .andExpect(jsonPath("$.number").value(0))
+                .andExpect(jsonPath("$.size").value(1))
+                .andExpect(jsonPath("$.totalPages").value(2))
+                .andExpect(jsonPath("$.first").value(true))
+                .andExpect(jsonPath("$.last").value(false))
+                .andExpect(jsonPath("$.empty").value(false))
+                .andExpect(jsonPath("$.page").doesNotExist());
+        mvc.perform(get("/api/events").param("keyword", keyword).param("size", "1").param("page", "1"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.content.length()").value(1))
+                .andExpect(jsonPath("$.content[0].id").value(second.getId()))
+                .andExpect(jsonPath("$.totalElements").value(2))
+                .andExpect(jsonPath("$.number").value(1))
+                .andExpect(jsonPath("$.size").value(1))
+                .andExpect(jsonPath("$.totalPages").value(2))
+                .andExpect(jsonPath("$.first").value(false))
+                .andExpect(jsonPath("$.last").value(true))
+                .andExpect(jsonPath("$.empty").value(false))
+                .andExpect(jsonPath("$.page").doesNotExist());
+    }
+
+    @Test
     void ownedListIncludesDeletedEventsButNotAnotherUsersEvents() throws Exception {
         EventResponse active = event(2);
         EventResponse deleted = event(2);
@@ -158,7 +225,16 @@ class EventOwnershipIntegrationTest extends PostgresTestSupport {
         var owned = events.myEvents(owner.getId(), 0, 12);
         assertEquals(Set.of(active.getId(), deleted.getId()), owned.content().stream().map(EventResponse::getId).collect(Collectors.toSet()));
         mvc.perform(get("/api/me/events").header("Authorization", token(owner)))
-                .andExpect(status().isOk()).andExpect(jsonPath("$.totalElements").value(2));
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.content.length()").value(2))
+                .andExpect(jsonPath("$.totalElements").value(2))
+                .andExpect(jsonPath("$.number").value(0))
+                .andExpect(jsonPath("$.size").value(12))
+                .andExpect(jsonPath("$.totalPages").value(1))
+                .andExpect(jsonPath("$.first").value(true))
+                .andExpect(jsonPath("$.last").value(true))
+                .andExpect(jsonPath("$.empty").value(false))
+                .andExpect(jsonPath("$.page").doesNotExist());
     }
 
     @Test

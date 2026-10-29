@@ -1,11 +1,14 @@
 package com.team.eventregistration.repository;
 
+import com.team.eventregistration.dto.PageResult;
 import com.team.eventregistration.entity.Category;
 import com.team.eventregistration.entity.City;
 import com.team.eventregistration.entity.Event;
 import jakarta.persistence.LockModeType;
 import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.Sort;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Modifying;
@@ -38,6 +41,22 @@ public interface EventRepository extends JpaRepository<Event, Long> {
 
     Page<Event> findByOrganizerUserIdOrderByCreatedAtDescIdDesc(
             Long ownerId, Pageable pageable);
+
+    default PageResult<Event> search(
+            String keyword, City city, Category category, int page, int size, String sort) {
+        return mapPage(findByFilters(keyword, city, category,
+                PageRequest.of(page, size, Sort.by(sort).ascending().and(Sort.by("id")))));
+    }
+
+    default PageResult<Event> owned(Long ownerId, int page, int size) {
+        return mapPage(findByOrganizerUserIdOrderByCreatedAtDescIdDesc(
+                ownerId, PageRequest.of(page, size)));
+    }
+
+    private PageResult<Event> mapPage(Page<Event> page) {
+        return new PageResult<>(
+                page.getContent(), page.getTotalElements(), page.getNumber(), page.getSize());
+    }
 
     @Modifying
     @Query("UPDATE Event e "

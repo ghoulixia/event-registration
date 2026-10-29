@@ -35,6 +35,7 @@ public class CreateEventRequest {
     @Min(value = 1, message = "Capacity must be at least 1")
     private Integer capacity;
 
+    @NotNull
     @Min(5)
     @jakarta.validation.constraints.Max(30)
     private Integer offerTtlMinutes = 10;

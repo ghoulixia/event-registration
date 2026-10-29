@@ -2,7 +2,7 @@ package com.team.eventregistration.controller;
 
 import com.team.eventregistration.dto.EventResponse;
 import com.team.eventregistration.service.EventService;
-import com.team.eventregistration.service.port.PageResult;
+import com.team.eventregistration.dto.PageResult;
 import io.swagger.v3.oas.annotations.security.SecurityRequirement;
 import org.springframework.web.bind.annotation.*;
 import java.security.Principal;
