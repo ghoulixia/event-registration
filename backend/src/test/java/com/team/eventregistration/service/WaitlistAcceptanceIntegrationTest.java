@@ -132,6 +132,11 @@ class WaitlistAcceptanceIntegrationTest extends PostgresTestSupport {
                 slotOfferRepository.findById(offer.getId()).orElseThrow().getStatus());
         assertCounters(event.getId(), 1, 0);
         assertEquals(1, auditCount(event.getId(), "REGISTRATION_CONFIRM"));
+        var history = registrations.getMyRegistrations(user.getId()).getFirst().getHistory();
+        assertEquals(1, history.size());
+        assertEquals("REGISTRATION_CONFIRM", history.getFirst().action());
+        assertEquals("NONE", history.getFirst().previousStatus());
+        assertEquals("CONFIRMED", history.getFirst().newStatus());
     }
 
     @Test

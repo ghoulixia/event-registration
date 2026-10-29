@@ -1,5 +1,6 @@
 package com.team.eventregistration.service;
 
+import com.team.eventregistration.dto.RegistrationHistoryResponse;
 import com.team.eventregistration.dto.RegistrationResponse;
 import com.team.eventregistration.entity.*;
 import com.team.eventregistration.exception.BusinessRuleException;
@@ -76,8 +77,13 @@ public class RegistrationService {
                 .orElseThrow(() -> new ResourceNotFoundException("User not found with ID: " + userId));
 
         List<Registration> registrations = registrationRepository.findByUser_Id(userId);
+        Map<Long, List<RegistrationHistoryResponse>> history = auditLogService.registrationHistory(userId);
         return registrations.stream()
-                .map(this::mapToResponse)
+                .map(registration -> {
+                    RegistrationResponse response = mapToResponse(registration);
+                    response.setHistory(history.getOrDefault(registration.getId(), List.of()));
+                    return response;
+                })
                 .toList();
     }
 

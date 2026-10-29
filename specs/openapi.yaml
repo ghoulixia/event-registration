@@ -1,0 +1,629 @@
+openapi: 3.0.3
+info:
+  title: Event Registration API
+  version: '1.0'
+  description: |
+    REST API for phase 1. Event date-times are local Asia/Ho_Chi_Minh without a Z suffix;
+    offer deadlines, serverNow and audit timestamps are UTC (ISO 8601 with Z).
+    A USER owns only events they created; there is no ADMIN role.
+servers:
+  - url: http://localhost:8080
+    description: Local backend
+
+tags:
+  - name: Auth
+  - name: Events
+  - name: Ownership
+  - name: Registrations
+  - name: Waitlist
+  - name: Offers
+
+paths:
+  /api/auth/register:
+    post:
+      tags: [Auth]
+      summary: Create a user account
+      operationId: registerUser
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/RegisterRequest' }
+      responses:
+        '201':
+          description: Account created
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/User' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /api/auth/login:
+    post:
+      tags: [Auth]
+      summary: Sign in and obtain a bearer token
+      operationId: login
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/LoginRequest' }
+      responses:
+        '200':
+          description: Signed in
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/AuthToken' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+  /api/users/me:
+    get:
+      tags: [Auth]
+      summary: Get current user profile
+      operationId: getMe
+      security: [{ bearerAuth: [] }]
+      responses:
+        '200':
+          description: User profile
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/User' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+  /api/events:
+    get:
+      tags: [Events]
+      summary: Search public events
+      operationId: listEvents
+      parameters:
+        - { name: keyword, in: query, schema: { type: string } }
+        - { name: city, in: query, schema: { $ref: '#/components/schemas/City' } }
+        - { name: category, in: query, schema: { $ref: '#/components/schemas/Category' } }
+        - { name: sort, in: query, schema: { type: string, enum: [startTime, title, createdAt, capacity], default: startTime } }
+        - { name: page, in: query, schema: { type: integer, minimum: 0, default: 0 } }
+        - { name: size, in: query, schema: { type: integer, minimum: 1, maximum: 50, default: 12 } }
+      responses:
+        '200':
+          description: Non-deleted events
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/EventPage' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+    post:
+      tags: [Ownership]
+      summary: Create an OPEN event owned by the current user
+      operationId: createEvent
+      security: [{ bearerAuth: [] }]
+      requestBody: { $ref: '#/components/requestBodies/CreateEvent' }
+      responses:
+        '201': { $ref: '#/components/responses/Event' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+  /api/events/{id}:
+    parameters:
+      - { $ref: '#/components/parameters/EventId' }
+    get:
+      tags: [Events]
+      summary: Get public event details and availability
+      operationId: getEvent
+      responses:
+        '200': { $ref: '#/components/responses/Event' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    put:
+      tags: [Ownership]
+      summary: Update an event owned by the current user
+      operationId: updateEvent
+      security: [{ bearerAuth: [] }]
+      requestBody: { $ref: '#/components/requestBodies/UpdateEvent' }
+      responses:
+        '200': { $ref: '#/components/responses/Event' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+    delete:
+      tags: [Ownership]
+      summary: Soft-delete an event with a reason
+      operationId: deleteEvent
+      security: [{ bearerAuth: [] }]
+      requestBody: { $ref: '#/components/requestBodies/Reason' }
+      responses:
+        '204': { description: Event hidden; registrations and audit retained }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /api/me/events:
+    get:
+      tags: [Ownership]
+      summary: List current user's events, including soft-deleted ones
+      operationId: myEvents
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - { name: page, in: query, schema: { type: integer, minimum: 0, default: 0 } }
+        - { name: size, in: query, schema: { type: integer, minimum: 1, maximum: 50, default: 12 } }
+      responses:
+        '200':
+          description: Owned events
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/EventPage' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+  /api/me/events/{id}:
+    parameters:
+      - { $ref: '#/components/parameters/EventId' }
+    get:
+      tags: [Ownership]
+      summary: Get owned event, including a soft-deleted event
+      operationId: myEventDetail
+      security: [{ bearerAuth: [] }]
+      responses:
+        '200': { $ref: '#/components/responses/Event' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /api/events/{id}/status:
+    parameters:
+      - { $ref: '#/components/parameters/EventId' }
+    patch:
+      tags: [Ownership]
+      summary: Open or close an owned event
+      operationId: changeEventStatus
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/StatusRequest' }
+      responses:
+        '200': { $ref: '#/components/responses/Event' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /api/events/{id}/thumbnail:
+    parameters:
+      - { $ref: '#/components/parameters/EventId' }
+    post:
+      tags: [Ownership]
+      summary: Upload a thumbnail for an owned event
+      operationId: uploadThumbnail
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file]
+              properties:
+                file: { type: string, format: binary, description: 'JPEG, PNG or WebP, up to 5 MB' }
+      responses:
+        '200': { $ref: '#/components/responses/Event' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /api/events/{id}/registrations:
+    parameters:
+      - { $ref: '#/components/parameters/EventId' }
+    get:
+      tags: [Ownership]
+      summary: List participants of an owned event
+      operationId: participants
+      security: [{ bearerAuth: [] }]
+      responses:
+        '200':
+          description: Participants
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: '#/components/schemas/Participant' } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    post:
+      tags: [Registrations]
+      summary: Confirm a direct registration if capacity is available
+      description: No request body. The current JWT user is registered; event owner cannot register.
+      operationId: registerForEvent
+      security: [{ bearerAuth: [] }]
+      responses:
+        '200':
+          description: Registration confirmed immediately
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Registration' }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /api/events/{id}/registrations/{registrationId}:
+    parameters:
+      - { $ref: '#/components/parameters/EventId' }
+      - name: registrationId
+        in: path
+        required: true
+        schema: { type: integer, format: int64 }
+    delete:
+      tags: [Ownership]
+      summary: Remove a confirmed participant with a reason
+      operationId: removeParticipant
+      security: [{ bearerAuth: [] }]
+      requestBody: { $ref: '#/components/requestBodies/Reason' }
+      responses:
+        '204': { description: Participant marked REMOVED; registration retained }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /api/events/{id}/audit-logs:
+    parameters:
+      - { $ref: '#/components/parameters/EventId' }
+    get:
+      tags: [Ownership]
+      summary: Read audit of an owned event, including after soft deletion
+      operationId: eventAudit
+      security: [{ bearerAuth: [] }]
+      responses:
+        '200':
+          description: Event and registration audit entries
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: '#/components/schemas/AuditEntry' } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+  /api/events/{id}/waitlist:
+    parameters:
+      - { $ref: '#/components/parameters/EventId' }
+    get:
+      tags: [Ownership]
+      summary: View waitlist of an owned event
+      operationId: ownerWaitlist
+      security: [{ bearerAuth: [] }]
+      responses:
+        '200':
+          description: Current waitlist
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: '#/components/schemas/OwnerWaitlistEntry' } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    post:
+      tags: [Waitlist]
+      summary: Join waitlist when the event is full
+      operationId: joinWaitlist
+      security: [{ bearerAuth: [] }]
+      responses:
+        '200':
+          description: Joined without holding a slot
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/WaitlistEntry' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /api/events/{id}/waitlist/me:
+    parameters:
+      - { $ref: '#/components/parameters/EventId' }
+    delete:
+      tags: [Waitlist]
+      summary: Leave own active waitlist entry
+      operationId: leaveWaitlist
+      security: [{ bearerAuth: [] }]
+      responses:
+        '204': { description: Left the waitlist }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /api/me/waitlist:
+    get:
+      tags: [Waitlist]
+      summary: View own active waitlist entries and offers
+      description: Only WAITING and OFFERED entries; completed offer history is not returned.
+      operationId: myWaitlist
+      security: [{ bearerAuth: [] }]
+      responses:
+        '200':
+          description: Entries with server time for offer countdown
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/MyWaitlist' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+  /api/me/registrations:
+    get:
+      tags: [Registrations]
+      summary: View own registrations and filtered history
+      description: History includes only confirm, cancel and participant removal for the current user's registrations; never raw event audit.
+      operationId: myRegistrations
+      security: [{ bearerAuth: [] }]
+      responses:
+        '200':
+          description: Registrations with their history
+          content:
+            application/json:
+              schema: { type: array, items: { $ref: '#/components/schemas/Registration' } }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+  /api/registrations/{id}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema: { type: integer, format: int64 }
+    delete:
+      tags: [Registrations]
+      summary: Cancel own confirmed registration before event start
+      operationId: cancelRegistration
+      security: [{ bearerAuth: [] }]
+      responses:
+        '204': { description: Cancelled; freed slot offered to waitlist first }
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /api/offers/{id}/accept:
+    parameters:
+      - { $ref: '#/components/parameters/OfferId' }
+    post:
+      tags: [Offers]
+      summary: Accept own pending, unexpired offer
+      operationId: acceptOffer
+      security: [{ bearerAuth: [] }]
+      responses:
+        '204': { description: Registration confirmed }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /api/offers/{id}/decline:
+    parameters:
+      - { $ref: '#/components/parameters/OfferId' }
+    post:
+      tags: [Offers]
+      summary: Decline own pending offer and release held slot
+      operationId: declineOffer
+      security: [{ bearerAuth: [] }]
+      responses:
+        '204': { description: Declined; next person considered }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+  /api/uploads/thumbnails/{file}:
+    parameters:
+      - name: file
+        in: path
+        required: true
+        schema: { type: string }
+    get:
+      tags: [Events]
+      summary: Fetch public event thumbnail
+      operationId: getThumbnail
+      responses:
+        '200': { description: 'Image bytes; content type depends on uploaded image' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+components:
+  securitySchemes:
+    bearerAuth: { type: http, scheme: bearer, bearerFormat: JWT }
+  parameters:
+    EventId:
+      name: id
+      in: path
+      required: true
+      schema: { type: integer, format: int64 }
+    OfferId:
+      name: id
+      in: path
+      required: true
+      schema: { type: integer, format: int64 }
+  requestBodies:
+    CreateEvent:
+      required: true
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/CreateEvent' }
+    UpdateEvent:
+      required: true
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/UpdateEvent' }
+    Reason:
+      required: true
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Reason' }
+  responses:
+    Event:
+      description: Event data
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Event' }
+    BadRequest: { description: Invalid request or validation error }
+    Unauthorized: { description: Missing or invalid JWT }
+    Forbidden: { description: Not the event owner }
+    NotFound: { description: Resource not found or hidden }
+    Conflict: { description: 'Business rule conflict (full event, duplicate entry or expired offer)' }
+  schemas:
+    City: { type: string, enum: [HANOI, HCMC] }
+    Category: { type: string, enum: [TECHNOLOGY, SPORTS, EDUCATION, MUSIC] }
+    LocalEventTime:
+      type: string
+      description: Local date and time in Asia/Ho_Chi_Minh, without timezone suffix
+      example: '2040-11-15T09:00:00'
+    UtcTime:
+      type: string
+      format: date-time
+      description: UTC timestamp with Z suffix
+      example: '2040-11-15T02:00:00Z'
+    RegisterRequest:
+      type: object
+      required: [email, displayName, password, confirmPassword]
+      properties:
+        email: { type: string, format: email }
+        displayName: { type: string }
+        password: { type: string, format: password, minLength: 6 }
+        confirmPassword: { type: string, format: password }
+        phone: { type: string, nullable: true }
+    LoginRequest:
+      type: object
+      required: [email, password]
+      properties:
+        email: { type: string, format: email }
+        password: { type: string, format: password }
+    User:
+      type: object
+      properties:
+        id: { type: integer, format: int64 }
+        email: { type: string, format: email }
+        displayName: { type: string }
+        phone: { type: string, nullable: true }
+    AuthToken:
+      type: object
+      properties:
+        accessToken: { type: string }
+        tokenType: { type: string, example: Bearer }
+    EventInput:
+      type: object
+      required: [title, organizerName, city, category, startTime, endTime, capacity]
+      properties:
+        title: { type: string, maxLength: 255 }
+        description: { type: string, nullable: true }
+        organizerName: { type: string, maxLength: 255 }
+        city: { $ref: '#/components/schemas/City' }
+        category: { $ref: '#/components/schemas/Category' }
+        startTime: { $ref: '#/components/schemas/LocalEventTime' }
+        endTime: { $ref: '#/components/schemas/LocalEventTime' }
+        capacity: { type: integer, minimum: 1 }
+        offerTtlMinutes: { type: integer, minimum: 5, maximum: 30, default: 10 }
+    CreateEvent:
+      allOf: [{ $ref: '#/components/schemas/EventInput' }]
+      example:
+        title: Community workshop
+        organizerName: Community
+        city: HANOI
+        category: EDUCATION
+        startTime: '2040-11-15T09:00:00'
+        endTime: '2040-11-15T11:00:00'
+        capacity: 1
+        offerTtlMinutes: 5
+    UpdateEvent:
+      allOf: [{ $ref: '#/components/schemas/EventInput' }]
+      required: [offerTtlMinutes]
+    StatusRequest:
+      type: object
+      required: [status]
+      properties:
+        status: { type: string, enum: [OPEN, CLOSED] }
+    Reason:
+      type: object
+      required: [reason]
+      properties:
+        reason: { type: string, minLength: 1, maxLength: 1000 }
+    Event:
+      type: object
+      properties:
+        id: { type: integer, format: int64 }
+        title: { type: string }
+        description: { type: string, nullable: true }
+        organizerName: { type: string }
+        organizerUserId: { type: integer, format: int64, nullable: true }
+        city: { $ref: '#/components/schemas/City' }
+        category: { $ref: '#/components/schemas/Category' }
+        startTime: { $ref: '#/components/schemas/LocalEventTime' }
+        endTime: { $ref: '#/components/schemas/LocalEventTime' }
+        capacity: { type: integer }
+        registeredCount: { type: integer }
+        heldCount: { type: integer }
+        remainingSlots: { type: integer, description: capacity - registeredCount - heldCount }
+        status: { type: string, enum: [OPEN, CLOSED] }
+        effectiveStatus: { type: string, enum: [OPEN, CLOSED] }
+        canRegister: { type: boolean }
+        offerTtlMinutes: { type: integer }
+        thumbnailUrl: { type: string, nullable: true }
+        deletedAt: { $ref: '#/components/schemas/LocalEventTime' }
+        createdAt: { $ref: '#/components/schemas/LocalEventTime' }
+        updatedAt: { $ref: '#/components/schemas/LocalEventTime' }
+    EventPage:
+      type: object
+      properties:
+        content: { type: array, items: { $ref: '#/components/schemas/Event' } }
+        totalElements: { type: integer, format: int64 }
+        totalPages: { type: integer }
+        number: { type: integer }
+        size: { type: integer }
+        first: { type: boolean }
+        last: { type: boolean }
+        empty: { type: boolean }
+    RegistrationHistory:
+      type: object
+      properties:
+        action: { type: string, enum: [REGISTRATION_CONFIRM, REGISTRATION_CANCEL, PARTICIPANT_REMOVE] }
+        createdAt: { $ref: '#/components/schemas/UtcTime' }
+        previousStatus: { type: string, nullable: true }
+        newStatus: { type: string }
+    Registration:
+      type: object
+      properties:
+        id: { type: integer, format: int64 }
+        eventId: { type: integer, format: int64 }
+        eventTitle: { type: string }
+        status: { type: string, enum: [CONFIRMED, CANCELLED, REMOVED] }
+        registeredAt: { $ref: '#/components/schemas/LocalEventTime' }
+        history: { type: array, description: Included on GET /api/me/registrations, items: { $ref: '#/components/schemas/RegistrationHistory' } }
+    Participant:
+      type: object
+      properties:
+        id: { type: integer, format: int64 }
+        userId: { type: integer, format: int64 }
+        displayName: { type: string }
+        email: { type: string, format: email }
+        status: { type: string, enum: [CONFIRMED, CANCELLED, REMOVED] }
+        registeredAt: { $ref: '#/components/schemas/LocalEventTime' }
+        cancelledAt: { $ref: '#/components/schemas/LocalEventTime' }
+        removedAt: { $ref: '#/components/schemas/LocalEventTime' }
+        removedReason: { type: string, nullable: true }
+    Offer:
+      type: object
+      properties:
+        id: { type: integer, format: int64 }
+        status: { type: string, enum: [PENDING, ACCEPTED, DECLINED, EXPIRED, REVOKED] }
+        expiresAt: { $ref: '#/components/schemas/UtcTime' }
+    WaitlistEntry:
+      type: object
+      properties:
+        id: { type: integer, format: int64 }
+        eventId: { type: integer, format: int64 }
+        eventTitle: { type: string }
+        userId: { type: integer, format: int64 }
+        status: { type: string, enum: [WAITING, OFFERED, ACCEPTED, LEFT, SKIPPED, CANCELLED] }
+        joinedAt: { $ref: '#/components/schemas/LocalEventTime' }
+        position: { type: integer, nullable: true }
+        offer: { $ref: '#/components/schemas/Offer' }
+    MyWaitlist:
+      type: object
+      properties:
+        entries: { type: array, items: { $ref: '#/components/schemas/WaitlistEntry' } }
+        serverNow: { $ref: '#/components/schemas/UtcTime' }
+    OwnerWaitlistEntry:
+      type: object
+      properties:
+        id: { type: integer, format: int64 }
+        eventId: { type: integer, format: int64 }
+        eventTitle: { type: string }
+        userId: { type: integer, format: int64 }
+        displayName: { type: string }
+        status: { type: string, enum: [WAITING, OFFERED] }
+        joinedAt: { $ref: '#/components/schemas/LocalEventTime' }
+        position: { type: integer, nullable: true }
+    AuditEntry:
+      type: object
+      description: Only an event owner may read full event audit, including after soft deletion.
+      properties:
+        id: { type: integer, format: int64 }
+        action: { type: string }
+        reason: { type: string, nullable: true }
+        createdAt: { $ref: '#/components/schemas/UtcTime' }
+        actorUserId: { type: integer, format: int64 }
+        actorName: { type: string }
+        details: { type: object, additionalProperties: true }

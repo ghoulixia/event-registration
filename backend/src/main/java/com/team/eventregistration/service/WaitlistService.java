@@ -18,7 +18,6 @@ import org.springframework.transaction.annotation.Transactional;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.LocalDateTime;
-import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Objects;
 
@@ -174,7 +173,7 @@ public class WaitlistService {
                                 offer.getId(),
                                 offer.getStatus(),
                                 offer.getExpiresAt() != null
-                                        ? offer.getExpiresAt().atZone(ZoneOffset.UTC).toInstant()
+                                        ? offer.getExpiresAt().atZone(clock.getZone()).toInstant()
                                         : null
                         ))
                 .orElse(null);
@@ -183,7 +182,7 @@ public class WaitlistService {
         }).toList();
 
         // 3. Return MyWaitlistResponse containing the list of WaitlistEntryResponse
-        return new MyWaitlistResponse(entryResponses, Instant.now());
+        return new MyWaitlistResponse(entryResponses, clock.instant());
     }
 
     private boolean isDuplicateWaitlistEntry(DataIntegrityViolationException ex) {
