@@ -18,7 +18,7 @@ import org.springframework.transaction.annotation.Transactional;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.LocalDateTime;
-import java.time.ZoneId;
+import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Objects;
 
@@ -174,7 +174,7 @@ public class WaitlistService {
                                 offer.getId(),
                                 offer.getStatus(),
                                 offer.getExpiresAt() != null
-                                        ? offer.getExpiresAt().atZone(ZoneId.of("Asia/Ho_Chi_Minh")).toInstant()
+                                        ? offer.getExpiresAt().atZone(ZoneOffset.UTC).toInstant()
                                         : null
                         ))
                 .orElse(null);
