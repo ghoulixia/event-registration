@@ -9,10 +9,13 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.boot.test.context.TestConfiguration;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Import;
+import org.springframework.context.annotation.Primary;
 import org.springframework.jdbc.core.JdbcTemplate;
 
-import java.time.Clock;
-import java.time.LocalDateTime;
+import java.time.*;
 import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.List;
@@ -25,6 +28,7 @@ import static org.junit.jupiter.api.Assertions.*;
  * and the FIFO/TTL state transitions required by the SRS.
  */
 @SpringBootTest
+@Import(WaitlistAcceptanceIntegrationTest.TestClockConfiguration.class)
 class WaitlistAcceptanceIntegrationTest extends PostgresTestSupport {
     @Autowired private RegistrationService registrations;
     @Autowired private EventService events;
@@ -38,7 +42,7 @@ class WaitlistAcceptanceIntegrationTest extends PostgresTestSupport {
     @Autowired private AuditLogRepository auditLogRepository;
     @Autowired private JdbcTemplate jdbc;
     @Autowired private EntityManager entityManager;
-    @Autowired private Clock clock;
+    @Autowired private MutableClock clock;
 
     private final List<Long> eventIds = new ArrayList<>();
     private final List<Long> userIds = new ArrayList<>();
@@ -278,22 +282,45 @@ class WaitlistAcceptanceIntegrationTest extends PostgresTestSupport {
         User user = user("ttl-cap");
         Event event = event(1);
         event.setOfferTtlMinutes(30);
-        event.setStartTime(LocalDateTime.now(clock).plusMinutes(5).truncatedTo(ChronoUnit.MICROS));
+        event.setStartTime(
+                LocalDateTime.now(clock)
+                        .plusMinutes(5)
+                        .truncatedTo(ChronoUnit.MICROS)
+        );
         event.setEndTime(event.getStartTime().plusHours(1));
         eventRepository.saveAndFlush(event);
         entry(user, event);
-
-        SlotOffer offer = offers.offerNextWaitingEntry(event.getId()).orElseThrow();
+        SlotOffer offer = offers.offerNextWaitingEntry(event.getId())
+                .orElseThrow();
 
         assertEquals(event.getStartTime(), offer.getExpiresAt());
-        assertTrue(offer.getExpiresAt().isBefore(offer.getCreatedAt().plusMinutes(30)));
-        assertEquals(1, eventRepository.findById(event.getId()).orElseThrow().getHeldCount());
+        assertTrue(
+                offer.getExpiresAt()
+                        .isBefore(offer.getCreatedAt().plusMinutes(30))
+        );
+        assertEquals(
+                1,
+                eventRepository.findById(event.getId())
+                        .orElseThrow()
+                        .getHeldCount()
+        );
 
-        offers.expireOffers(event.getStartTime());
+        Duration untilEventStart = Duration.between(
+                clock.instant(),
+                event.getStartTime()
+                        .atZone(clock.getZone())
+                        .toInstant()
+        );
+        clock.advance(untilEventStart);
+        offers.expireOffers(LocalDateTime.now(clock));
         entityManager.clear();
 
-        assertEquals(SlotOfferStatus.EXPIRED,
-                slotOfferRepository.findById(offer.getId()).orElseThrow().getStatus());
+        assertEquals(
+                SlotOfferStatus.EXPIRED,
+                slotOfferRepository.findById(offer.getId())
+                        .orElseThrow()
+                        .getStatus()
+        );
         assertCounters(event.getId(), 0, 0);
     }
 
@@ -302,15 +329,26 @@ class WaitlistAcceptanceIntegrationTest extends PostgresTestSupport {
         User user = user("idempotent-expiry");
         Event event = event(1);
         entry(user, event);
-        SlotOffer offer = offers.offerNextWaitingEntry(event.getId()).orElseThrow();
-        LocalDateTime afterExpiry = offer.getExpiresAt().plusSeconds(1);
+        SlotOffer offer = offers.offerNextWaitingEntry(event.getId())
+                .orElseThrow();
+        Duration untilExpiry = Duration.between(
+                clock.instant(),
+                offer.getExpiresAt()
+                        .atZone(clock.getZone())
+                        .toInstant()
+        );
+        clock.advance(untilExpiry.plusSeconds(1));
 
-        assertEquals(1, offers.expireOffers(afterExpiry));
-        assertEquals(0, offers.expireOffers(afterExpiry));
+        assertEquals(1, offers.expireOffers(LocalDateTime.now(clock)));
+        assertEquals(0, offers.expireOffers(LocalDateTime.now(clock)));
         entityManager.clear();
 
-        assertEquals(SlotOfferStatus.EXPIRED,
-                slotOfferRepository.findById(offer.getId()).orElseThrow().getStatus());
+        assertEquals(
+                SlotOfferStatus.EXPIRED,
+                slotOfferRepository.findById(offer.getId())
+                        .orElseThrow()
+                        .getStatus()
+        );
         assertCounters(event.getId(), 0, 0);
     }
 
@@ -325,10 +363,15 @@ class WaitlistAcceptanceIntegrationTest extends PostgresTestSupport {
         LocalDateTime originalRegisteredAt = registration.getRegisteredAt();
 
         registrations.cancelRegistration(user.getId(), registration.getId());
+
+        clock.advance(Duration.ofSeconds(1));
+
         registrations.registerForEvent(user.getId(), event.getId());
         entityManager.clear();
 
-        Registration saved = registrationRepository.findById(registration.getId()).orElseThrow();
+        Registration saved = registrationRepository.findById(registration.getId())
+                .orElseThrow();
+
         assertEquals(RegistrationStatus.CONFIRMED, saved.getStatus());
         assertNull(saved.getCancelledAt());
         assertTrue(saved.getRegisteredAt().isAfter(originalRegisteredAt));
@@ -387,5 +430,46 @@ class WaitlistAcceptanceIntegrationTest extends PostgresTestSupport {
         return jdbc.queryForObject(
                 "SELECT count(*) FROM audit_logs WHERE target_type='EVENT' AND target_id=? AND action=?",
                 Integer.class, eventId, action);
+    }
+
+    static class MutableClock extends Clock {
+        private Instant value;
+        private final ZoneId zone;
+
+        MutableClock(Instant value, ZoneId zone) {
+            this.value = value;
+            this.zone = zone;
+        }
+
+        @Override
+        public ZoneId getZone() {
+            return zone;
+        }
+
+        @Override
+        public Clock withZone(ZoneId zone) {
+            return new WaitlistAcceptanceIntegrationTest.MutableClock(value, zone);
+        }
+
+        @Override
+        public Instant instant() {
+            return value;
+        }
+
+        void advance(Duration duration) {
+            value = value.plus(duration);
+        }
+    }
+
+    @TestConfiguration
+    static class TestClockConfiguration {
+        @Bean
+        @Primary
+        WaitlistAcceptanceIntegrationTest.MutableClock testClock() {
+            return new WaitlistAcceptanceIntegrationTest.MutableClock(
+                    Instant.now(),
+                    ZoneId.of("Asia/Ho_Chi_Minh")
+            );
+        }
     }
 }

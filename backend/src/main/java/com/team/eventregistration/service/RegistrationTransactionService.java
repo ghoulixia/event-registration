@@ -6,14 +6,14 @@ import com.team.eventregistration.exception.BusinessRuleException;
 import com.team.eventregistration.exception.DuplicateRegistrationException;
 import com.team.eventregistration.exception.EventFullException;
 import com.team.eventregistration.exception.ResourceNotFoundException;
-import com.team.eventregistration.repository.EventRepository;
-import com.team.eventregistration.repository.RegistrationRepository;
-import com.team.eventregistration.repository.UserRepository;
+import com.team.eventregistration.repository.*;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Clock;
 import java.time.LocalDateTime;
+import java.util.Collection;
+import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 
@@ -22,6 +22,8 @@ public class RegistrationTransactionService {
     private final RegistrationRepository registrationRepository;
     private final EventRepository eventRepository;
     private final UserRepository userRepository;
+    private final WaitlistEntryRepository waitlistEntryRepository;
+    private final SlotOfferRepository slotOfferRepository;
     private final AuditLogService auditLogService;
     private final Clock clock;
 
@@ -29,12 +31,16 @@ public class RegistrationTransactionService {
             RegistrationRepository registrationRepository,
             EventRepository eventRepository,
             UserRepository userRepository,
+            WaitlistEntryRepository waitlistEntryRepository,
+            SlotOfferRepository slotOfferRepository,
             AuditLogService auditLogService,
             Clock clock
     ) {
         this.registrationRepository = registrationRepository;
         this.eventRepository = eventRepository;
         this.userRepository = userRepository;
+        this.waitlistEntryRepository = waitlistEntryRepository;
+        this.slotOfferRepository = slotOfferRepository;
         this.auditLogService = auditLogService;
         this.clock = clock;
     }
@@ -57,6 +63,15 @@ public class RegistrationTransactionService {
         }
         if (!now.isBefore(event.getStartTime())) {
             throw new BusinessRuleException("Cannot register for an event that has already started.");
+        }
+
+        if (waitlistEntryRepository.findByUser_IdAndEvent_IdAndStatusIn(
+                userId, eventId, List.of(WaitlistEntryStatus.WAITING, WaitlistEntryStatus.OFFERED)).isPresent()) {
+            throw new BusinessRuleException("User is already on the waitlist for this event. Please accept or decline the waitlist offer before registering.");
+        }
+        if (slotOfferRepository.findByUser_IdAndEvent_IdAndStatus(
+                userId, eventId, SlotOfferStatus.PENDING).isPresent()) {
+            throw new BusinessRuleException("User already has a pending slot offer for this event. Please accept or decline the offer before registering.");
         }
 
         int unreservedSlots = event.getCapacity() - event.getRegisteredCount() - event.getHeldCount();

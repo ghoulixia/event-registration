@@ -5,9 +5,7 @@ import com.team.eventregistration.entity.*;
 import com.team.eventregistration.exception.BusinessRuleException;
 import com.team.eventregistration.exception.DuplicateRegistrationException;
 import com.team.eventregistration.exception.EventFullException;
-import com.team.eventregistration.repository.EventRepository;
-import com.team.eventregistration.repository.RegistrationRepository;
-import com.team.eventregistration.repository.UserRepository;
+import com.team.eventregistration.repository.*;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -31,6 +29,8 @@ class RegistrationTransactionServiceTest {
     @Mock private RegistrationRepository registrationRepository;
     @Mock private EventRepository eventRepository;
     @Mock private UserRepository userRepository;
+    @Mock private WaitlistEntryRepository waitlistEntryRepository;
+    @Mock private SlotOfferRepository slotOfferRepository;
     @Mock private AuditLogService auditLogService;
 
     private RegistrationTransactionService service;
@@ -43,7 +43,9 @@ class RegistrationTransactionServiceTest {
                 Instant.parse("2026-10-10T03:00:00Z"),
                 ZoneId.of("Asia/Ho_Chi_Minh"));
         service = new RegistrationTransactionService(
-                registrationRepository, eventRepository, userRepository, auditLogService, clock);
+                registrationRepository, eventRepository, userRepository,
+                waitlistEntryRepository, slotOfferRepository,
+                auditLogService, clock);
 
         user = new User("attendee@example.com", "Attendee", "hash", null, Role.USER);
         user.setId(1L);

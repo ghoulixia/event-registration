@@ -9,9 +9,12 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.boot.test.context.TestConfiguration;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Import;
+import org.springframework.context.annotation.Primary;
 
-import java.time.Clock;
-import java.time.LocalDateTime;
+import java.time.*;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -23,6 +26,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
 @SpringBootTest
+@Import(SlotOfferServiceIntegrationTest.TestClockConfiguration.class)
 class SlotOfferServiceIntegrationTest extends PostgresTestSupport {
     @Autowired private SlotOfferService slotOfferService;
     @Autowired private RegistrationService registrationService;
@@ -33,7 +37,7 @@ class SlotOfferServiceIntegrationTest extends PostgresTestSupport {
     @Autowired private RegistrationRepository registrationRepository;
     @Autowired private AuditLogRepository auditLogRepository;
     @Autowired private EntityManager entityManager;
-    @Autowired private Clock clock;
+    @Autowired private MutableClock clock;
 
     private final List<Long> createdUserIds = new ArrayList<>();
     private final List<Long> createdEventIds = new ArrayList<>();
@@ -84,16 +88,37 @@ class SlotOfferServiceIntegrationTest extends PostgresTestSupport {
         Event event = saveEvent(LocalDateTime.now(clock).plusHours(2), 1);
         saveEntry(user, event);
 
-        SlotOffer offer = slotOfferService.offerNextWaitingEntry(event.getId()).orElseThrow();
-        slotOfferService.expireOffers(offer.getExpiresAt().plusSeconds(1));
+        SlotOffer offer = slotOfferService
+                .offerNextWaitingEntry(event.getId())
+                .orElseThrow();
+
+        Duration untilExpiration = Duration.between(
+                clock.instant(),
+                offer.getExpiresAt()
+                        .atZone(clock.getZone())
+                        .toInstant()
+        );
+
+        clock.advance(untilExpiration.plusSeconds(1));
+
+        slotOfferService.expireOffers(LocalDateTime.now(clock));
         entityManager.clear();
 
-        SlotOffer savedOffer = slotOfferRepository.findById(offer.getId()).orElseThrow();
-        Event savedEvent = eventRepository.findById(event.getId()).orElseThrow();
+        SlotOffer savedOffer = slotOfferRepository
+                .findById(offer.getId())
+                .orElseThrow();
+
+        Event savedEvent = eventRepository
+                .findById(event.getId())
+                .orElseThrow();
+
         assertEquals(SlotOfferStatus.EXPIRED, savedOffer.getStatus());
         assertEquals(0, savedEvent.getHeldCount());
         assertEquals(0, savedEvent.getRegisteredCount());
-        assertEquals(0, savedEvent.getRegisteredCount() + savedEvent.getHeldCount());
+        assertEquals(
+                0,
+                savedEvent.getRegisteredCount() + savedEvent.getHeldCount()
+        );
     }
 
     @Test
@@ -221,9 +246,9 @@ class SlotOfferServiceIntegrationTest extends PostgresTestSupport {
         slotOfferService.finishWaitlistAtEventStart(event.getId());
         entityManager.clear();
 
-        assertEquals(SlotOfferStatus.REVOKED,
+        assertEquals(SlotOfferStatus.EXPIRED,
                 slotOfferRepository.findById(offer.getId()).orElseThrow().getStatus());
-        assertEquals(WaitlistEntryStatus.CANCELLED,
+        assertEquals(WaitlistEntryStatus.SKIPPED,
                 waitlistEntryRepository.findById(offeredEntry.getId()).orElseThrow().getStatus());
         assertEquals(WaitlistEntryStatus.CANCELLED,
                 waitlistEntryRepository.findById(waitingEntry.getId()).orElseThrow().getStatus());
@@ -262,7 +287,7 @@ class SlotOfferServiceIntegrationTest extends PostgresTestSupport {
         Event savedEvent = eventRepository.findById(event.getId()).orElseThrow();
         assertEquals(0, savedEvent.getHeldCount());
         assertEquals(0, savedEvent.getRegisteredCount());
-        assertEquals(SlotOfferStatus.REVOKED,
+        assertEquals(SlotOfferStatus.EXPIRED,
                 slotOfferRepository.findById(offer.getId()).orElseThrow().getStatus());
         assertEquals(0, savedEvent.getRegisteredCount() + savedEvent.getHeldCount());
     }
@@ -319,6 +344,47 @@ class SlotOfferServiceIntegrationTest extends PostgresTestSupport {
         } catch (InterruptedException exception) {
             Thread.currentThread().interrupt();
             throw new IllegalStateException("Test thread interrupted.", exception);
+        }
+    }
+
+    static class MutableClock extends Clock {
+        private Instant value;
+        private final ZoneId zone;
+
+        MutableClock(Instant value, ZoneId zone) {
+            this.value = value;
+            this.zone = zone;
+        }
+
+        @Override
+        public ZoneId getZone() {
+            return zone;
+        }
+
+        @Override
+        public Clock withZone(ZoneId zone) {
+            return new MutableClock(value, zone);
+        }
+
+        @Override
+        public Instant instant() {
+            return value;
+        }
+
+        void advance(Duration duration) {
+            value = value.plus(duration);
+        }
+    }
+
+    @TestConfiguration
+    static class TestClockConfiguration {
+        @Bean
+        @Primary
+        MutableClock testClock() {
+            return new MutableClock(
+                    Instant.now(),
+                    ZoneId.of("Asia/Ho_Chi_Minh")
+            );
         }
     }
 }

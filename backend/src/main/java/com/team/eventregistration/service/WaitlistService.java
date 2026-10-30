@@ -10,13 +10,10 @@ import com.team.eventregistration.exception.ResourceNotFoundException;
 import com.team.eventregistration.repository.*;
 import com.team.eventregistration.service.port.EventOfferLifecycle;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.hibernate.exception.ConstraintViolationException;
-import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Clock;
-import java.time.Instant;
 import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Objects;
@@ -29,6 +26,7 @@ public class WaitlistService {
     private final RegistrationRepository registrationRepository;
     private final SlotOfferRepository slotOfferRepository;
     private final EventOfferLifecycle eventOfferLifecycle;
+    private final WaitlistEntryPersistenceAdapter waitlistEntryPersistenceAdapter;
     private final Clock clock;
 
     @Autowired
@@ -39,6 +37,7 @@ public class WaitlistService {
             RegistrationRepository registrationRepository,
             SlotOfferRepository slotOfferRepository,
             EventOfferLifecycle eventOfferLifecycle,
+            WaitlistEntryPersistenceAdapter waitlistEntryPersistenceAdapter,
             Clock clock
     ) {
         this.waitlistEntryRepository = waitlistEntryRepository;
@@ -47,6 +46,7 @@ public class WaitlistService {
         this.registrationRepository = registrationRepository;
         this.slotOfferRepository = slotOfferRepository;
         this.eventOfferLifecycle = eventOfferLifecycle;
+        this.waitlistEntryPersistenceAdapter = waitlistEntryPersistenceAdapter;
         this.clock = clock;
     }
 
@@ -85,18 +85,14 @@ public class WaitlistService {
             throw new DuplicateWaitlistEntryException("User is already waiting for this event.");
         }
 
-        try {
-            WaitlistEntry entry = waitlistEntryRepository.saveAndFlush(new WaitlistEntry(user, event));
-            List<WaitlistEntry> entries = waitlistEntryRepository
-                    .findByEvent_IdAndStatusOrderByJoinedAtAscIdAsc(
-                            eventId, WaitlistEntryStatus.WAITING);
-            return mapToResponse(entry, entries.indexOf(entry) + 1);
-        } catch (DataIntegrityViolationException ex) {
-            if (isDuplicateWaitlistEntry(ex)) {
-                throw new DuplicateWaitlistEntryException("User is already waiting for this event.");
-            }
-            throw ex;
-        }
+        WaitlistEntry entry = waitlistEntryPersistenceAdapter.saveNewEntry(
+                new WaitlistEntry(user, event));
+
+        List<WaitlistEntry> entries = waitlistEntryRepository
+                .findByEvent_IdAndStatusOrderByJoinedAtAscIdAsc(
+                        eventId, WaitlistEntryStatus.WAITING);
+
+        return mapToResponse(entry, entries.indexOf(entry) + 1);
     }
 
     @Transactional
@@ -186,19 +182,6 @@ public class WaitlistService {
 
         // 3. Return MyWaitlistResponse containing the list of WaitlistEntryResponse
         return new MyWaitlistResponse(entryResponses, clock.instant());
-    }
-
-    private boolean isDuplicateWaitlistEntry(DataIntegrityViolationException ex) {
-        Throwable cause = ex.getCause();
-
-        while (cause != null) {
-            if (cause instanceof ConstraintViolationException cve) {
-                return "uk_waitlist_active_user_event".equals(cve.getConstraintName());
-            }
-            cause = cause.getCause();
-        }
-
-        return false;
     }
 
     private List<WaitlistEntryResponse> mapEntries(List<WaitlistEntry> entries) {

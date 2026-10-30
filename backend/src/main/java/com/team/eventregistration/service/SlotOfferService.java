@@ -9,8 +9,6 @@ import com.team.eventregistration.repository.EventRepository;
 import com.team.eventregistration.repository.RegistrationRepository;
 import com.team.eventregistration.repository.SlotOfferRepository;
 import com.team.eventregistration.repository.WaitlistEntryRepository;
-import jakarta.persistence.EntityManager;
-import jakarta.persistence.PersistenceContext;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Propagation;
@@ -28,9 +26,6 @@ public class SlotOfferService {
     private final RegistrationRepository registrationRepository;
     private final AuditLogService auditLogService;
     private final Clock clock;
-
-    @PersistenceContext
-    private EntityManager entityManager;
 
     @Autowired
     public SlotOfferService(
@@ -84,7 +79,7 @@ public class SlotOfferService {
     @Transactional
     public void allocateAvailableSlotsToWaitlist(Long eventId, LocalDateTime at) {
         Event event = lockEvent(eventId);
-        allocateAvailableSlotsToWaitlist(event, at);
+        allocateAvailableSlotsToWaitlist(event, now());
     }
 
     @Transactional
@@ -334,7 +329,7 @@ public class SlotOfferService {
 
         for (Long eventId : processedEventIds) {
             Event event = lockEvent(eventId);
-            expiredCount += processEventOffersLocked(event, at);
+            expiredCount += processEventOffersLocked(event, now());
         }
 
         for (SlotOffer candidate : candidates) {
@@ -343,7 +338,7 @@ public class SlotOfferService {
                 continue;
             }
             Event event = lockEvent(eventId);
-            expiredCount += processEventOffersLocked(event, at);
+            expiredCount += processEventOffersLocked(event, now());
             processedEventIds.add(eventId);
         }
         return expiredCount;
@@ -415,11 +410,7 @@ public class SlotOfferService {
     private void finishInactiveWaitlistLocked(Event event, LocalDateTime at) {
         for (SlotOffer offer : slotOfferRepository.findByEvent_IdAndStatus(
                 event.getId(), SlotOfferStatus.PENDING)) {
-            if (at.isBefore(offer.getExpiresAt())) {
-                revokeOffer(offer, at);
-            } else {
-                expireOffer(offer, at);
-            }
+            expireOffer(offer, at);
         }
 
         for (WaitlistEntry entry : waitlistEntryRepository
@@ -648,9 +639,7 @@ public class SlotOfferService {
     }
 
     private void refresh(SlotOffer offer) {
-        if (entityManager != null) {
-            entityManager.refresh(offer);
-        }
+        slotOfferRepository.refresh(offer);
     }
 
     private LocalDateTime now() {

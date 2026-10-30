@@ -9,6 +9,9 @@ import com.team.eventregistration.service.port.EventOfferLifecycle;
 import org.hibernate.exception.ConstraintViolationException;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.Mock;
+import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.dao.DataIntegrityViolationException;
 
 import java.time.*;
@@ -18,13 +21,15 @@ import java.util.Optional;
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
 
+@ExtendWith(MockitoExtension.class)
 class WaitlistServiceTest {
-    private WaitlistEntryRepository waitlistEntryRepository;
-    private EventRepository eventRepository;
-    private UserRepository userRepository;
-    private SlotOfferRepository slotOfferRepository;
-    private RegistrationRepository registrationRepository;
-    private EventOfferLifecycle eventOfferLifecycle;
+    @Mock private WaitlistEntryRepository waitlistEntryRepository;
+    @Mock private EventRepository eventRepository;
+    @Mock private UserRepository userRepository;
+    @Mock private SlotOfferRepository slotOfferRepository;
+    @Mock private RegistrationRepository registrationRepository;
+    @Mock private EventOfferLifecycle eventOfferLifecycle;
+    @Mock private WaitlistEntryPersistenceAdapter waitlistEntryPersistenceAdapter;
     private WaitlistService waitlistService;
     private Clock clock;
     private Event event;
@@ -38,13 +43,6 @@ class WaitlistServiceTest {
         ZoneId zoneId = ZoneId.of("Asia/Ho_Chi_Minh");
         clock = Clock.fixed(fixedInstant, zoneId);
 
-        waitlistEntryRepository = mock(WaitlistEntryRepository.class);
-        eventRepository = mock(EventRepository.class);
-        userRepository = mock(UserRepository.class);
-        registrationRepository = mock(RegistrationRepository.class);
-        slotOfferRepository = mock(SlotOfferRepository.class);
-        eventOfferLifecycle = mock(EventOfferLifecycle.class);
-
         waitlistService = new WaitlistService(
                 waitlistEntryRepository,
                 eventRepository,
@@ -52,6 +50,7 @@ class WaitlistServiceTest {
                 registrationRepository,
                 slotOfferRepository,
                 eventOfferLifecycle,
+                waitlistEntryPersistenceAdapter,
                 clock
         );
 
@@ -143,12 +142,11 @@ class WaitlistServiceTest {
     }
 
     @Test
-    void translatesOnlyTheActiveWaitlistUniqueConstraintViolation() {
+    void propagatesDuplicateWaitlistEntryException() {
         prepareFullEventForJoin();
-        ConstraintViolationException cause = mock(ConstraintViolationException.class);
-        when(cause.getConstraintName()).thenReturn("uk_waitlist_active_user_event");
-        when(waitlistEntryRepository.saveAndFlush(any(WaitlistEntry.class)))
-                .thenThrow(new DataIntegrityViolationException("duplicate", cause));
+        when(waitlistEntryPersistenceAdapter.saveNewEntry(any(WaitlistEntry.class)))
+                .thenThrow(new com.team.eventregistration.exception.DuplicateWaitlistEntryException(
+                        "User is already waiting for this event."));
 
         assertThrows(
                 com.team.eventregistration.exception.DuplicateWaitlistEntryException.class,
@@ -159,11 +157,9 @@ class WaitlistServiceTest {
     @Test
     void rethrowsUnrelatedDataIntegrityViolations() {
         prepareFullEventForJoin();
-        ConstraintViolationException cause = mock(ConstraintViolationException.class);
-        when(cause.getConstraintName()).thenReturn("chk_waitlist_status");
         DataIntegrityViolationException failure =
-                new DataIntegrityViolationException("invalid status", cause);
-        when(waitlistEntryRepository.saveAndFlush(any(WaitlistEntry.class)))
+                new DataIntegrityViolationException("invalid status");
+        when(waitlistEntryPersistenceAdapter.saveNewEntry(any(WaitlistEntry.class)))
                 .thenThrow(failure);
 
         assertThrows(
@@ -183,9 +179,12 @@ class WaitlistServiceTest {
         when(eventRepository.findByIdForUpdate(10L)).thenReturn(Optional.of(event));
         when(registrationRepository.findByUser_IdAndEvent_Id(1L, 10L))
                 .thenReturn(Optional.empty());
-        when(waitlistEntryRepository.findByUser_IdAndEvent_IdAndStatus(
-                1L, 10L, WaitlistEntryStatus.WAITING)).thenReturn(Optional.empty());
-        when(waitlistEntryRepository.saveAndFlush(any(WaitlistEntry.class)))
+        when(waitlistEntryRepository.findByUser_IdAndEvent_IdAndStatusIn(
+                1L,
+                10L,
+                List.of(WaitlistEntryStatus.WAITING, WaitlistEntryStatus.OFFERED)
+        )).thenReturn(Optional.empty());
+        when(waitlistEntryPersistenceAdapter.saveNewEntry(any(WaitlistEntry.class)))
                 .thenAnswer(invocation -> invocation.getArgument(0));
         when(waitlistEntryRepository.findByEvent_IdAndStatusOrderByJoinedAtAscIdAsc(
                 10L, WaitlistEntryStatus.WAITING)).thenReturn(List.of());
@@ -268,11 +267,13 @@ class WaitlistServiceTest {
         event.setRegisteredCount(1);
         when(eventRepository.findByIdForUpdate(10L)).thenReturn(Optional.of(event));
         when(userRepository.findById(1L)).thenReturn(Optional.of(firstUser));
-        when(eventRepository.findByIdAndDeletedAtIsNull(10L)).thenReturn(Optional.of(event));
         when(registrationRepository.findByUser_IdAndEvent_Id(1L, 10L))
                 .thenReturn(Optional.empty());
-        when(waitlistEntryRepository.findByUser_IdAndEvent_IdAndStatus(
-                1L, 10L, WaitlistEntryStatus.WAITING)).thenReturn(Optional.empty());
+        when(waitlistEntryRepository.findByUser_IdAndEvent_IdAndStatusIn(
+                1L,
+                10L,
+                List.of(WaitlistEntryStatus.WAITING, WaitlistEntryStatus.OFFERED)
+        )).thenReturn(Optional.empty());
     }
 
     private User user(Long id) {

@@ -8,7 +8,7 @@ import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Optional;
 
-public interface SlotOfferRepository extends JpaRepository<SlotOffer, Long> {
+public interface SlotOfferRepository extends JpaRepository<SlotOffer, Long>, SlotOfferRepositoryCustom {
     Optional<SlotOffer> findByIdAndUser_Id(Long id, Long userId);
 
     Optional<SlotOffer> findByWaitlistEntry_IdAndStatus(
