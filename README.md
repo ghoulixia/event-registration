@@ -65,8 +65,11 @@ specs/openapi.yaml                                 Đặc tả API có thể xem
 - Docker Compose: chạy backend và PostgreSQL trên máy tiếp nhận dự án. Frontend chạy bằng Node.js/npm.
 
 ## 5. Kiểm thử tải
+**Kaggle Notebook:** https://www.kaggle.com/code/ndtthanh/event-registration-test/notebook
 
-Kiểm thử sử dụng K6 v2.3.0 trên Kaggle CPU. Backend Spring Boot và PostgreSQL chạy bằng Docker Compose trên máy phát triển, được truy cập qua Cloudflare Tunnel.
+Sử dụng K6 v2.3.0 trên Kaggle Notebook (CPU) để kiểm thử backend Spring Boot và PostgreSQL chạy bằng Docker Compose trên máy phát triển. Các script kiểm thử và SQL phục vụ việc chuẩn bị dữ liệu được lưu trong thư mục `load-tests/` của repository để thuận tiện cho việc tái sử dụng trong Pha 2. Môi trường Kaggle được cấu hình với **Accelerator: None** và **Internet: On**. K6 truy cập backend thông qua Cloudflare Tunnel. Do đó, kết quả thời gian phản hồi có thể chịu ảnh hưởng của kết nối mạng và môi trường triển khai.
+
+Hai kịch bản được thực hiện bằng `load-test.js` và `contention-test.js`.
 
 ### 5.1. Kiểm thử tải thông thường
 
