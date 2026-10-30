@@ -64,7 +64,52 @@ specs/openapi.yaml                                 Đặc tả API có thể xem
 - Spring Data JPA, PostgreSQL: lưu và truy vấn dữ liệu; Flyway cập nhật cấu trúc bảng khi khởi động.
 - Docker Compose: chạy backend và PostgreSQL trên máy tiếp nhận dự án. Frontend chạy bằng Node.js/npm.
 
-## 5. Chạy nhanh và tài liệu API
+## 5. Kiểm thử tải
+
+Kiểm thử sử dụng K6 v2.3.0 trên Kaggle CPU. Backend Spring Boot và PostgreSQL chạy bằng Docker Compose trên máy phát triển, được truy cập qua Cloudflare Tunnel.
+
+### 5.1. Kiểm thử tải thông thường
+
+Tăng tải đến 50 VUs, kiểm tra xem danh sách, chi tiết sự kiện và đăng ký.
+
+| Chỉ số | Kỳ vọng | Kết quả |
+|---|---|---:|
+| Tổng yêu cầu HTTP | - | 2.712 |
+| Thông lượng | - | 19,97 req/s |
+| HTTP response time p95 | < 500 ms | 286,82 ms |
+| Registration p95 | < 800 ms | 820,55 ms |
+| Đăng ký thành công | 50/50 | 50/50 |
+| Lỗi hệ thống | < 1% | 0% |
+| Phản hồi đăng ký ngoài dự kiến | 0 | 0 |
+
+HTTP response time p95 đạt ngưỡng đề ra. Tuy nhiên, Registration p95 vượt nhẹ ngưỡng 800 ms, cho thấy hiệu năng API đăng ký cần được cải thiện.
+
+### 5.2. Kiểm thử tranh chấp chỗ cuối
+
+50 người dùng cùng đăng ký khi sự kiện chỉ còn hai chỗ.
+
+| Chỉ số | Kỳ vọng | Kết quả |
+|---|---|---:|
+| Đăng ký thành công | Đúng 2 | 2 |
+| HTTP 409 dự kiến | 48 | 48 |
+| Registration p95 | < 800 ms | 462,07 ms |
+| Lỗi hệ thống | < 1% | 0% |
+| Phản hồi ngoài dự kiến | 0 | 0 |
+
+Kết quả phù hợp với sức chứa: hai lượt đăng ký thành công, 48 yêu cầu còn lại nhận HTTP 409 do xung đột nghiệp vụ. Dữ liệu sau kiểm thử đúng như kỳ vọng.
+
+### 5.3. Đánh giá
+
+Hệ thống xử lý đúng tình huống tranh chấp số chỗ trong kịch bản thử nghiệm. Tuy nhiên, Registration p95 ở bài tải thông thường chưa đạt ngưỡng mục tiêu 800 ms. Pha 2 cần tiếp tục phân tích và cải thiện hiệu năng API đăng ký. Ngoài ra, cần mở rộng kiểm thử các nghiệp vụ chính, bao gồm:
+
+- **Danh sách chờ và lời mời:** kiểm tra thứ tự FIFO, chấp nhận/từ chối lời mời và xử lý lời mời hết hạn.
+- **Tính nhất quán dữ liệu:** kiểm tra đăng ký đồng thời, hủy đăng ký và giải phóng chỗ để bảo đảm sức chứa không bị vượt quá.
+- **Phân quyền và bảo mật:** kiểm tra xác thực JWT, quyền sở hữu sự kiện và quyền truy cập lịch sử đăng ký.
+- **Kiểm thử hồi quy:** chạy lại các kiểm thử nghiệp vụ sau khi thay đổi mã nguồn để phát hiện lỗi phát sinh.
+
+**Lưu ý:** Các ngưỡng < 500 ms, < 800 ms và < 1% là mục tiêu dùng để đánh giá kết quả kiểm thử, không phải khẳng định rằng toàn bộ hệ thống đã đáp ứng mọi quy mô tải thực tế.
+
+## 6. Chạy nhanh và tài liệu API
 
 Cần Docker Desktop (Linux containers), Node.js/npm và PowerShell. Tại thư mục gốc, tạo khóa JWT cho lần chạy này rồi bật backend và database:
 
